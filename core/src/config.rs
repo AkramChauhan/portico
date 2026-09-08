@@ -236,6 +236,14 @@ impl Config {
             // Nothing to configure without dnsmasq; hosts entries cover it.
             return Vec::new();
         }
+        self.dns_managed_tlds()
+    }
+
+    /// The TLDs dnsmasq would have to answer for, whether or not it is
+    /// installed. Kept separate from `tlds_needing_dns` so the rule can be
+    /// asserted on a machine that does not happen to have dnsmasq — testing
+    /// it through the gate made the outcome depend on the host.
+    pub(crate) fn dns_managed_tlds(&self) -> Vec<String> {
         self.managed_tlds
             .iter()
             .filter(|t| !NATIVE_TLDS.contains(&t.as_str()))
@@ -365,7 +373,20 @@ mod tests {
     fn native_tlds_are_excluded_from_dns_setup() {
         let c = Config::default();
         assert!(c.is_wildcard_resolved("app.localhost"));
-        assert_eq!(c.tlds_needing_dns(), vec!["test".to_string()]);
+        // `.localhost` resolves natively, so only `.test` is dnsmasq's problem.
+        assert_eq!(c.dns_managed_tlds(), vec!["test".to_string()]);
+    }
+
+    #[test]
+    fn no_dns_is_needed_without_dnsmasq() {
+        // The gate, not the rule. This is the half that legitimately depends
+        // on the machine, so it asserts only what holds either way.
+        let c = Config::default();
+        if crate::paths::dnsmasq_bin().is_none() {
+            assert!(c.tlds_needing_dns().is_empty());
+        } else {
+            assert_eq!(c.tlds_needing_dns(), c.dns_managed_tlds());
+        }
     }
 
     #[test]

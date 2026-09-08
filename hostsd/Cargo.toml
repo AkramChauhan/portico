@@ -1,0 +1,13 @@
+[package]
+name = "portico-hostsd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "portico-hostsd"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true

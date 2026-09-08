@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["core", "cli", "hostsd", "app/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["akramchauhan"]
+description = "Local development domains with trusted HTTPS, plus public URLs for webhooks"
+readme = "README.md"
+
+[workspace.dependencies]
+portico-core = { path = "core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portico — Documentation</title>
+<meta name="doc:status"   content="Current">
+<meta name="doc:reviewed" content="2026-09-09">
+<meta name="doc:sources"  content="">
+<link rel="stylesheet" href="assets/docs.css?v=0.1">
+<style>
+  .hub { max-width:900px; margin:0 auto; padding:0 40px 120px; }
+  .hero { padding:64px 0 40px; }
+  .doc-row { display:grid; grid-template-columns:1fr auto; gap:8px 24px; align-items:start;
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:20px 24px; margin-bottom:12px; text-decoration:none; box-shadow:var(--shadow); transition:.16s; }
+  .doc-row:hover { border-color:var(--accent); transform:translateY(-1px); box-shadow:var(--shadow-l); }
+  .doc-row .ttl { font-size:17px; font-weight:640; color:var(--ink); letter-spacing:-.02em; }
+  .doc-row .bl { font-size:14px; color:var(--muted); margin-top:5px; line-height:1.55; grid-column:1/-1; }
+  .doc-row .mt { font-size:11.6px; color:var(--faint); margin-top:10px; grid-column:1/-1; font-family:var(--mono); }
+  @media (max-width:700px) { .hub { padding:0 20px 80px; } }
+</style>
+</head>
+<body>
+
+<header class="d-top">
+  <a class="d-logo" href="index.html">
+    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <path d="M4 13 16 5l12 8" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M8 13v12M16 13v12M24 13v12" stroke="var(--accent)" stroke-width="2" opacity=".55"/>
+      <path d="M3 26h26" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    Portico
+  </a>
+  <span class="sep">/</span><span class="doc-name">Documentation</span>
+</header>
+
+<div class="hub">
+  <div class="hero">
+    <div class="eyebrow">Portico · macOS</div>
+    <h1>Documentation</h1>
+    <p class="lede">Portico gives any local project a real HTTPS address, and a public one
+    when a webhook needs to reach it. The handbook below covers how that works, what it
+    changes on the machine, and the platform traps behind the odd-looking code.</p>
+  </div>
+
+  <h2 id="docs" style="border:none;padding-top:0">Documents</h2>
+  <div id="docList"></div>
+
+  <h2 id="status">Where the project stands</h2>
+  <div class="grid c4">
+    <div class="stat"><div class="n g" id="sDone">—</div><div class="l">Capabilities shipped</div></div>
+    <div class="stat"><div class="n v" id="sTodo">—</div><div class="l">Still open</div></div>
+    <div class="stat"><div class="n r" id="sRisk">—</div><div class="l">Open risks</div></div>
+    <div class="stat"><div class="n" id="sAssume">—</div><div class="l">Unverified assumptions</div></div>
+  </div>
+
+  <h2 id="state">Capabilities</h2>
+  <p>Rendered from <code>docs/data/data.js</code>. Changing a status there updates every
+  document at once — which is the point.</p>
+  <div class="t-scroll"><table id="featTable">
+    <thead><tr><th>Area</th><th>Capability</th><th>Status</th><th>Detail</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <h2 id="how">How these docs stay honest</h2>
+  <div class="grid c2">
+    <div class="d-card"><h4>Shared facts live in one file</h4>
+      <p>Capabilities, assumptions, risks and the glossary come from
+      <code>docs/data/data.js</code>. Documents render from it rather than restating it, so
+      the same fact cannot drift into four subtly different versions.</p></div>
+    <div class="d-card"><h4>Every doc declares what it describes</h4>
+      <p>A <code>doc:sources</code> meta tag lists the code paths it documents, alongside a
+      <code>doc:reviewed</code> date. That is what makes staleness detectable rather than a
+      matter of memory.</p></div>
+    <div class="d-card"><h4>A checker, not a good intention</h4>
+      <p><code>node docs/check-freshness.mjs</code> compares each reviewed date against the
+      last change to the code it claims to describe, and exits non-zero when behind.</p></div>
+    <div class="d-card"><h4>Unverified claims are labelled</h4>
+      <p>Anything not actually tested is registered as an assumption with a stated way to
+      kill it. If a number is not in that register, it was verified.</p></div>
+  </div>
+
+  <h2 id="glossary">Glossary</h2>
+  <p>Terms Portico introduces, which are otherwise easy to misread.</p>
+  <div class="t-scroll"><table id="glossTable">
+    <thead><tr><th style="width:180px">Term</th><th>Meaning</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+</div>
+
+<script src="data/data.js?v=0.1"></script>
+<script src="assets/docs.js?v=0.1"></script>
+<script>
+window.DKInit = function () {
+  var D = window.DOCS, S = { Draft:'amber', Current:'green', Superseded:'grey' };
+
+  document.getElementById('docList').innerHTML = D.docs.map(function (d) {
+    return '<a class="doc-row" href="' + d.file + '">' +
+      '<div class="ttl">' + d.title + '</div>' +
+      '<span class="badge ' + (S[d.status]||'grey') + ' dot">' + d.status + '</span>' +
+      '<div class="bl">' + d.blurb + '</div>' +
+      '<div class="mt">' + d.file + ' · reviewed ' + d.updated + ' · ' + d.owner + '</div></a>';
+  }).join('');
+
+  var FS = { done:'green', doing:'amber', todo:'grey', blocked:'red' };
+  document.querySelector('#featTable tbody').innerHTML = D.features.map(function (f) {
+    return '<tr><td>' + f.area + '</td><td><b>' + f.t + '</b></td>' +
+      '<td><span class="badge ' + FS[f.s] + ' dot">' + f.s + '</span></td>' +
+      '<td>' + f.d + '</td></tr>';
+  }).join('');
+
+  document.querySelector('#glossTable tbody').innerHTML = D.glossary.map(function (g) {
+    return '<tr><td><b>' + g.t + '</b></td><td>' + g.d + '</td></tr>';
+  }).join('');
+
+  document.getElementById('sDone').textContent   = D.features.filter(function (f) { return f.s === 'done'; }).length;
+  document.getElementById('sTodo').textContent   = D.features.filter(function (f) { return f.s !== 'done'; }).length;
+  document.getElementById('sRisk').textContent   = D.risks.filter(function (r) { return r.status === 'Open'; }).length;
+  document.getElementById('sAssume').textContent = D.assumptions.filter(function (a) { return /Unverified/i.test(a.confidence); }).length;
+};
+</script>
+</body>
+</html>

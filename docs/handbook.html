@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portico — Engineering handbook</title>
+<meta name="doc:status"   content="Current">
+<meta name="doc:reviewed" content="2026-09-09">
+<meta name="doc:sources"  content="core/src/caddy.rs, core/src/setup.rs, core/src/tunnel.rs, core/src/target.rs, core/src/runner.rs, core/src/lib.rs, hostsd/src/main.rs">
+<link rel="stylesheet" href="assets/docs.css?v=0.1">
+<style>
+  .diagram { width:100%; height:auto; display:block; }
+  .diagram text { font-family:var(--sans); }
+</style>
+</head>
+<body>
+
+<header class="d-top">
+  <a class="d-logo" href="index.html">
+    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <path d="M4 13 16 5l12 8" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M8 13v12M16 13v12M24 13v12" stroke="var(--accent)" stroke-width="2" opacity=".55"/>
+      <path d="M3 26h26" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    Portico
+  </a>
+  <span class="sep">/</span>
+  <span class="doc-name">Handbook</span>
+  <span class="badge green dot">Current</span>
+  <span class="spacer"></span>
+  <button class="d-btn" onclick="window.print()">Print / PDF</button>
+</header>
+
+<div class="d-shell">
+  <nav class="d-side"><div class="toc-h">On this page</div><div data-toc></div></nav>
+  <main class="d-main">
+  <div class="d-wrap">
+
+    <div class="d-head">
+      <div class="eyebrow">Engineering handbook · v0.1.0</div>
+      <h1>How Portico works, and what it costs</h1>
+      <p class="lede">Portico is a thin, unprivileged app driving a Caddy server. The design
+      turns on one decision — every site gets a second, plain-HTTP vhost on loopback — and one
+      tradeoff: it installs a root daemon and then stops asking for a password. This document
+      covers both, plus the platform traps that look like arbitrary complexity until you know
+      what they defend against.</p>
+      <div class="d-meta">
+        <span><b>Status</b> Current</span>
+        <span><b>Owner</b> akramchauhan</span>
+        <span><b>Last reviewed</b> 2026-09-09</span>
+      </div>
+    </div>
+
+    <div class="note info">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.1" stroke-linecap="round"/></svg>
+      <div><span class="t">What is verified here.</span>
+      The request paths, TLS trust and port behaviour below
+      were exercised end to end on a real machine, including a public URL returning 200 with
+      a publicly trusted certificate. Claims that were <em>not</em> tested are marked and
+      listed in the assumptions register on this page.</div>
+    </div>
+
+    <h2 id="paths">1 · The two request paths</h2>
+    <p>A browser on this Mac and a webhook sender on the internet arrive by completely
+    different routes, and the only thing that reconciles them is the loopback twin.</p>
+
+    <figure>
+      <svg class="diagram" viewBox="0 0 760 330" role="img"
+           aria-label="Two request paths converging on one Caddy handler">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 10 5 0 10z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+
+        <!-- local path -->
+        <rect x="10" y="28" width="150" height="52" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="85" y="50" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Your browser</text>
+        <text x="85" y="68" text-anchor="middle" font-size="11" fill="var(--muted)">this Mac</text>
+
+        <!-- internet path -->
+        <rect x="10" y="196" width="150" height="52" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="85" y="218" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Stripe / GitHub</text>
+        <text x="85" y="236" text-anchor="middle" font-size="11" fill="var(--muted)">the internet</text>
+
+        <rect x="196" y="196" width="132" height="52" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="262" y="218" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--ink)">cloudflared</text>
+        <text x="262" y="236" text-anchor="middle" font-size="11" fill="var(--muted)">or ngrok</text>
+
+        <!-- caddy -->
+        <rect x="374" y="56" width="188" height="176" rx="10" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.6"/>
+        <text x="468" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">Caddy</text>
+
+        <rect x="392" y="96" width="152" height="50" rx="7" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="468" y="115" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">:443  https://site.io</text>
+        <text x="468" y="132" text-anchor="middle" font-size="10.5" fill="var(--muted)">tls internal</text>
+
+        <rect x="392" y="158" width="152" height="54" rx="7" fill="var(--surface-2)" stroke="var(--accent)" stroke-dasharray="4 3"/>
+        <text x="468" y="177" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">:8880  loopback twin</text>
+        <text x="468" y="194" text-anchor="middle" font-size="10.5" fill="var(--muted)">plain HTTP · bind 127.0.0.1</text>
+
+        <!-- targets -->
+        <rect x="606" y="40" width="146" height="44" rx="7" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="679" y="60" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">PHP-FPM</text>
+        <text x="679" y="75" text-anchor="middle" font-size="10.5" fill="var(--muted)">Laravel, WordPress</text>
+
+        <rect x="606" y="100" width="146" height="44" rx="7" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="679" y="120" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">Dev server</text>
+        <text x="679" y="135" text-anchor="middle" font-size="10.5" fill="var(--muted)">Next, Vite, Node</text>
+
+        <rect x="606" y="160" width="146" height="44" rx="7" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="679" y="180" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">Files</text>
+        <text x="679" y="195" text-anchor="middle" font-size="10.5" fill="var(--muted)">dist, build, out</text>
+
+        <!-- arrows -->
+        <path d="M160 54 H 392" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+        <path d="M160 222 H 196" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+        <path d="M328 222 H 392" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+        <path d="M544 121 H 606 V 62" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+        <path d="M544 121 H 578 V 122 H 606" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+        <path d="M544 185 H 606 V 182" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+
+        <text x="276" y="46" text-anchor="middle" font-size="10.5" fill="var(--faint)">DNS: /etc/hosts</text>
+        <text x="360" y="270" text-anchor="middle" font-size="10.5" fill="var(--faint)">--http-host-header site.io</text>
+        <text x="468" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">same handler, either way</text>
+      </svg>
+      <figcaption class="fig-t"><b>The dashed box is the whole trick.</b> Pointing tunnels at a
+      plain-HTTP twin rather than the HTTPS listener means the tunnel never has to trust the
+      local CA, and the Host header carries the site's real name — so a webhook hits the same
+      routing, the same logs and the same app as a local request.</figcaption>
+    </figure>
+
+<h2 id="dns">2 · Name resolution</h2>
+    <p>Getting a name to resolve is the part that needs the machine's cooperation, and it
+    is where the two modes differ.</p>
+
+    <div class="t-scroll"><table>
+      <thead><tr><th>Name</th><th>How it resolves</th><th>Cost</th></tr></thead>
+      <tbody>
+        <tr><td><code>app.localhost</code></td><td>macOS resolves <code>*.localhost</code> itself, per RFC 6761</td><td>Nothing at all</td></tr>
+        <tr><td><code>app.test</code></td><td>dnsmasq wildcard plus <code>/etc/resolver/test</code></td><td>Optional — only if dnsmasq is installed</td></tr>
+        <tr><td><code>app.io</code></td><td>One line in the managed block of <code>/etc/hosts</code></td><td>One authorisation at install, then never again</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7h14M5 12h14M5 17h9" stroke-linecap="round"/></svg>
+      <div><span class="t">Why dnsmasq is optional.</span>
+      It only buys wildcard <code>*.test</code> names. Every
+      domain works through <code>/etc/hosts</code>, and since the helper writes that without a
+      password, dnsmasq's absence costs a convenience rather than a capability. It has no
+      official macOS binary release, so requiring it would have dragged Homebrew back into
+      the prerequisites for a nicety.</div>
+    </div>
+
+<h2 id="privilege">3 · The privilege split</h2>
+    <p>Exactly one thing genuinely requires root on macOS: binding ports 80 and 443.
+    Everything else has an unprivileged equivalent, and the two modes exist because of that
+    single constraint.</p>
+
+    <div class="grid c2">
+      <div class="d-card"><h4>System mode — the default</h4>
+        <p>Caddy runs as a root LaunchDaemon, so URLs have no port. One authorisation at
+        install covers the daemon, DNS and the hosts helper.</p></div>
+      <div class="d-card"><h4>Standalone mode</h4>
+        <p>Caddy runs as a user LaunchAgent on <code>:8443</code>. Nothing outside the home
+        folder is touched, except one <code>/etc/hosts</code> line for a custom domain.</p></div>
+    </div>
+
+    <p>The app itself is never privileged. It reconfigures Caddy through the loopback admin
+    API, which is why adding a site is instant and silent — and also the source of the
+    largest open risk, covered in the <a href="security.html">security model</a>.</p>
+
+<h2 id="targets">4 · Working out what to serve</h2>
+    <p>Point the target at a directory and the type is inferred, so a port is only needed for
+    stacks that require a process of their own.</p>
+
+    <div class="t-scroll"><table>
+      <thead><tr><th>Detected</th><th>How</th><th>Served as</th></tr></thead>
+      <tbody>
+        <tr><td>PHP project</td><td><code>public/index.php</code> or <code>index.php</code></td><td><code>php_fastcgi</code> to PHP-FPM, front-controller <code>try_files</code></td></tr>
+        <tr><td>JS project</td><td><code>package.json</code> with a <code>dev</code>, <code>start</code> or <code>serve</code> script</td><td>Portico runs the dev server and proxies to a port it assigns</td></tr>
+        <tr><td>Built output</td><td><code>dist/</code>, <code>build/</code>, <code>out/</code>, <code>_site/</code> containing <code>index.html</code></td><td>File server</td></tr>
+        <tr><td>Ambiguous</td><td><code>package.json</code> with neither script nor build</td><td><b>Rejected</b> with an explanation, rather than a mystifying 404</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>PHP needs no port because PHP-FPM is already a shared daemon that Caddy speaks FastCGI
+    to. Node has no equivalent, so Portico supervises the dev server itself — which also ends
+    the question of which project owns port 3000.</p>
+
+<h2 id="providers">5 · Public URL providers</h2>
+    <div class="t-scroll"><table>
+      <thead><tr><th>Provider</th><th>Account</th><th>Stable hostname</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><b>cloudflared quick</b> — default</td><td><span class="badge green dot">None</span></td><td>No — new random name each run</td><td>Verified anonymous: no config, no login, works first try</td></tr>
+        <tr><td>cloudflared named</td><td>Cloudflare + your domain</td><td>Yes</td><td>Not implemented yet</td></tr>
+        <tr><td>ngrok free</td><td><span class="badge amber dot">Required</span></td><td>No</td><td>Without an authtoken the agent refuses to start (<code>ERR_NGROK_4018</code>)</td></tr>
+        <tr><td>ngrok paid</td><td><span class="badge amber dot">Required</span></td><td>Yes, custom domain</td><td>Plan is detectable from the assigned hostname: the free tier is always <code>*.ngrok-free.app</code></td></tr>
+      </tbody>
+    </table></div>
+
+    <p>cloudflared stays the default precisely because it needs no account. Making ngrok the
+    default would put a sign-up wall in front of the first thing a new user tries, which is
+    the opposite of the zero-prerequisite install.</p>
+
+<h2 id="changes">6 · What is installed</h2>
+    <div class="t-scroll"><table>
+      <thead><tr><th>Change</th><th>Mode</th><th>Owner</th><th>Removable</th></tr></thead>
+      <tbody>
+        <tr><td><code>/Library/LaunchDaemons/io.portico.caddy.plist</code></td><td>System</td><td>root</td><td>Yes — <code>portico uninstall</code></td></tr>
+        <tr><td><code>/Library/LaunchDaemons/io.portico.hostsd.plist</code></td><td>System</td><td>root</td><td>Yes</td></tr>
+        <tr><td><code>/Library/Application Support/Portico/portico-hostsd</code></td><td>System</td><td>root</td><td>Yes</td></tr>
+        <tr><td>Managed block in <code>/etc/hosts</code></td><td>Both</td><td>root</td><td>Yes — block removed entirely</td></tr>
+        <tr><td><code>/etc/resolver/&lt;tld&gt;</code>, dnsmasq drop-in</td><td>System, if dnsmasq present</td><td>root</td><td>Yes</td></tr>
+        <tr><td><code>~/Library/LaunchAgents/io.portico.caddy.plist</code></td><td>Standalone</td><td>user</td><td>Yes — no password needed</td></tr>
+        <tr><td>Caddy CA in the login keychain</td><td>Both</td><td>user</td><td>Yes</td></tr>
+        <tr><td><code>~/.portico</code> — mode <code>0700</code></td><td>Both</td><td>user</td><td>Delete the folder</td></tr>
+      </tbody>
+    </table></div>
+
+<h2 id="helper">7 · The /etc/hosts helper</h2>
+    <p>The file that triggers the helper is writable by the logged-in user, so its contents
+    are treated as hostile input. The capability granted is real, and bounding it is the
+    entire design:</p>
+
+    <div class="grid c2">
+      <div class="d-card"><h4>Only loopback mappings</h4>
+        <p>The sole thing ever written is <code>127.0.0.1</code>/<code>::1</code> lines inside
+        Portico's own markers. Every other line of <code>/etc/hosts</code> is copied through
+        untouched.</p></div>
+      <div class="d-card"><h4>Strict hostname allowlist</h4>
+        <p>Checked before use, so no whitespace, newline or <code>#</code> can break out of a
+        line and forge an entry. Covered by tests that attempt exactly that.</p></div>
+      <div class="d-card"><h4>Capped and atomic</h4>
+        <p>At most 200 entries, and the file is replaced by rename so a crash cannot leave it
+        truncated.</p></div>
+      <div class="d-card"><h4>Not sudoers, not setuid</h4>
+        <p>A <code>sudoers</code> NOPASSWD rule leaves a standing password-free
+        <code>sudo</code>. Setuid is worse — callable by anything, any time, with the caller's
+        environment. This is neither.</p></div>
+    </div>
+
+    <div class="note warn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3.5 22 20H2z" stroke-linejoin="round"/><path d="M12 10v4.2M12 17.2v.1" stroke-linecap="round"/></svg>
+      <div><span class="t">The honest cost.</span>
+      Anything running as you can cause a root-privileged write to
+      <code>/etc/hosts</code> without a password. The worst achievable outcome is pointing a
+      hostname at loopback — which <em>is</em> the feature. It cannot obtain root code
+      execution and cannot modify a line it did not create. That is the price of "stop asking
+      me for a password", and it should be a deliberate choice rather than a surprise.</div>
+    </div>
+
+<h2 id="register">8 · Risk register</h2>
+    <p>Rendered from <code>docs/data/data.js</code>, so this table and every other reference
+    to these risks cannot drift apart.</p>
+    <div class="t-scroll"><table id="rTable">
+      <thead><tr><th style="width:56px">ID</th><th>Risk</th><th style="width:80px">Severity</th><th style="width:96px">Status</th><th>Position</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+
+<h2 id="admin">9 · The largest open risk</h2>
+    <p>Caddy's admin API listens unauthenticated on <code>127.0.0.1:2019</code>. In System
+    mode it drives a root process, so any local process can reconfigure it — including to
+    serve any file root can read.</p>
+
+    <p>There is no clean fix available. Caddy supports a unix socket for the admin endpoint,
+    but offers no way to set that socket's permissions; created by root with a default umask
+    it would be unreachable by the unprivileged app that needs it. The alternatives — running
+    Caddy unprivileged behind a <code>pf</code> redirect, or building a bespoke privileged
+    helper for config changes — are substantial redesigns.</p>
+
+    <div class="note info">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.1" stroke-linecap="round"/></svg>
+      <div><span class="t">A nuance worth knowing.</span>
+      In <b>Standalone</b> mode this is not a privilege
+      boundary at all: Caddy runs as you, so the admin API grants nothing you do not already
+      have. The risk is specific to System mode.</div>
+    </div>
+
+<h2 id="macos">10 · macOS platform traps</h2>
+    <p>None of these are documented anywhere obvious, and each cost a debugging cycle.</p>
+
+    <div class="t-scroll"><table>
+      <thead><tr><th style="width:190px">Believed</th><th>Actually</th><th style="width:200px">Now</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>caddy trust</code> installs the CA when run as root.</td>
+          <td>It shells out to <code>sudo</code> <em>even when already root</em>, which fails with no tty: <code>failed to execute sudo: exit status 1</code>.</td>
+          <td>The root certificate is fetched from Caddy's admin API and installed directly.</td>
+        </tr>
+        <tr>
+          <td>Certificate trust can be scripted inside the privileged installer.</td>
+          <td><code>security add-trusted-cert</code> must present its own authorisation dialog. Nothing launched by <code>do shell script … with administrator privileges</code> can show UI: <em>"the authorization was denied since no user interaction was possible"</em>.</td>
+          <td>Trust runs from an ordinary process, in the user trust domain, for both modes.</td>
+        </tr>
+        <tr>
+          <td>A launchd job inherits a usable environment.</td>
+          <td>It inherits no <code>HOME</code>. Caddy resolved its data directory to a <em>relative</em> path and failed with <code>mkdir caddy: read-only file system</code> — an error that names neither the real cause nor the real path.</td>
+          <td>Both plists set <code>HOME</code>, <code>XDG_*</code> and a working directory.</td>
+        </tr>
+        <tr>
+          <td><code>launchctl bootout</code> then <code>bootstrap</code> reloads a job.</td>
+          <td>A <code>KeepAlive</code> job respawns faster than one bootout retires it, and <code>bootstrap</code> fails outright on an already-loaded job (<code>Input/output error</code>). Plist edits appeared to do nothing.</td>
+          <td>Every job is retired with a retry loop that waits until it is genuinely gone.</td>
+        </tr>
+        <tr>
+          <td>A <code>WatchPaths</code> job fires on every change.</td>
+          <td><code>ThrottleInterval</code> defaults to <b>10 seconds</b>. Two edits in quick succession silently skipped the second — which is exactly how removing a site left an orphaned hosts entry.</td>
+          <td><code>ThrottleInterval</code> set to 1.</td>
+        </tr>
+        <tr>
+          <td>Rust CLIs behave in pipelines.</td>
+          <td>Rust aborts on <code>SIGPIPE</code>, so <code>portico ls | head</code> panicked rather than exiting quietly.</td>
+          <td><code>SIGPIPE</code> reset to default in <code>main</code>.</td>
+        </tr>
+      </tbody>
+    </table></div>
+
+<h2 id="ordering">11 · The recurring bug: state saved before the act succeeded</h2>
+    <p>This shape appeared <b>four separate times</b> and is worth recognising on sight. The
+    code saved configuration, then performed the system change the configuration described.
+    When the change failed or was refused, the two disagreed permanently.</p>
+
+    <div class="t-scroll"><table>
+      <thead><tr><th style="width:150px">Where</th><th>Symptom when it failed</th></tr></thead>
+      <tbody>
+        <tr><td><code>remove_site</code></td><td>Site gone from config, its <code>/etc/hosts</code> line left behind — orphaned, with nothing left that knew the domain existed to clean it up. <b>Reported by a user.</b></td></tr>
+        <tr><td><code>add_site</code></td><td>Site in config but never served.</td></tr>
+        <tr><td><code>set_tunnel</code></td><td>Toggle switched on, nothing running, no error. Read as the app having lost the site. <b>Reported by a user.</b></td></tr>
+        <tr><td><code>set_run</code></td><td>Same, for a supervised dev server.</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="note warn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3.5 22 20H2z" stroke-linejoin="round"/><path d="M12 10v4.2M12 17.2v.1" stroke-linecap="round"/></svg>
+      <div><span class="t">The rule now:</span>
+      perform the system change first, persist only on success. If you
+      find yourself writing <code>cfg.save()?</code> before an <code>apply()</code>, that is
+      this bug again.</div>
+    </div>
+
+<h2 id="assumptions">12 · What is not verified</h2>
+    <p>Everything else in this document was exercised on a real machine. These were not.</p>
+    <div class="t-scroll"><table id="aTable">
+      <thead><tr><th style="width:52px">ID</th><th>Assumption</th><th style="width:96px">Impact</th><th style="width:130px">Confidence</th><th>How to kill it</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+
+  </div>
+  </main>
+</div>
+
+<script src="data/data.js?v=0.1"></script>
+<script src="assets/docs.js?v=0.1"></script>
+<script>
+window.DKInit = function () {
+  var D = window.DOCS;
+  var SV = { Critical:'red', High:'red', Medium:'amber', Low:'grey' };
+  var ST = { Open:'red', Accepted:'amber', Mitigated:'green' };
+  var C  = { 'Unverified':'red', 'Partly evidenced':'amber', 'Disproved':'grey' };
+
+  document.querySelector('#rTable tbody').innerHTML = D.risks.map(function (r) {
+    return '<tr><td><code>' + r.id + '</code></td><td>' + r.risk + '</td>' +
+      '<td><span class="badge ' + (SV[r.sev]||'grey') + ' dot">' + r.sev + '</span></td>' +
+      '<td><span class="badge ' + (ST[r.status]||'grey') + ' dot">' + r.status + '</span></td>' +
+      '<td>' + r.mit + '</td></tr>';
+  }).join('');
+
+  document.querySelector('#aTable tbody').innerHTML = D.assumptions.map(function (a) {
+    return '<tr><td><code>' + a.id + '</code></td><td>' + a.text + '</td>' +
+      '<td>' + a.impact + '</td>' +
+      '<td><span class="badge ' + (C[a.confidence]||'grey') + ' dot">' + a.confidence + '</span></td>' +
+      '<td>' + a.how + '</td></tr>';
+  }).join('');
+};
+</script>
+</body>
+</html>

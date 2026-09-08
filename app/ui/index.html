@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Portico</title>
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+
+<!-- ───────────────── onboarding ───────────────── -->
+<section id="onboarding" class="onboarding hidden">
+  <div class="ob-drag" data-tauri-drag-region></div>
+<div class="ob-lang">
+        <div class="langpicker">
+          <button class="lang-btn" data-role="btn" aria-haspopup="menu" aria-expanded="false">
+            <span data-role="flag">🌐</span>
+            <span data-role="code"></span>
+            <svg viewBox="0 0 10 6" width="9" height="6" aria-hidden="true">
+              <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div class="lang-menu hidden" data-role="menu" role="menu"></div>
+        </div>
+  </div>
+
+  <div class="ob-card">
+    <header class="wiz-head">
+      <span class="ob-mark"></span>
+      <div class="wiz-heading">
+        <h1 data-i18n="onboarding.title">Set up Portico</h1>
+        <p id="wiz-progress" class="muted"></p>
+      </div>
+      <div class="wiz-dots"><i data-dot="1"></i><i data-dot="2"></i></div>
+    </header>
+
+    <!-- Step 1 -->
+    <section class="wiz-panel" data-panel="1">
+      <h2 data-i18n="onboarding.step1.title">Get the tools</h2>
+      <p class="wiz-lead" data-i18n="onboarding.step1.lead">Portico uses two small tools.</p>
+      <ul id="ob-tools" class="ob-tools"></ul>
+    </section>
+
+    <!-- Step 2 -->
+    <section class="wiz-panel hidden" data-panel="2">
+      <h2 id="ob-step2-title" data-i18n="onboarding.step2.title">Grant access, once</h2>
+      <p class="wiz-lead" data-i18n="onboarding.step2.choose">Which setup do you want?</p>
+
+      <div class="modes wiz-modes" id="ob-modes">
+        <button class="mode" data-mode="system">
+          <strong data-i18n="settings.mode.system.title">System</strong>
+          <span data-i18n="settings.mode.system.body">One password, once.</span>
+          <em class="mode-tag" data-i18n="settings.mode.recommended">Recommended</em>
+        </button>
+        <button class="mode" data-mode="standalone">
+          <strong data-i18n="settings.mode.standalone.title">Standalone</strong>
+          <span data-i18n="settings.mode.standalone.body">No administrator password.</span>
+        </button>
+      </div>
+
+      <p class="wiz-lead" id="ob-step2-lead"></p>
+      <p class="wiz-ask" id="ob-step2-ask"></p>
+      <div id="ob-access" class="ob-access muted"></div>
+    </section>
+
+    <footer class="wiz-foot">
+      <button id="ob-back" class="btn ghost hidden" data-i18n="onboarding.back">Back</button>
+      <span id="ob-note" class="muted" data-i18n="onboarding.note">Everything here can be removed from Settings.</span>
+      <button id="ob-next" class="btn primary lg" data-i18n="onboarding.continue">Continue</button>
+    </footer>
+  </div>
+</section>
+
+<!-- ───────────────── app shell ───────────────── -->
+<div id="shell" class="shell hidden">
+
+  <nav class="sidebar">
+    <!-- Reserved for the macOS traffic lights, which cannot be moved. Leaving
+         this row empty is what lets the brand below share the navigation's
+         left edge instead of floating clear of the buttons. -->
+    <div class="sidebar-top" data-tauri-drag-region></div>
+
+    <div class="brand">
+      <span class="mark"></span>
+      <span class="name">Portico</span>
+    </div>
+
+    <button class="nav" data-view="sites">
+      <span class="nav-ico">◧</span><span data-i18n="nav.sites">Sites</span>
+      <span id="nav-count" class="nav-count"></span>
+    </button>
+    <button class="nav" data-view="settings">
+      <span class="nav-ico">⚙</span><span data-i18n="nav.settings">Settings</span>
+    </button>
+    <button class="nav" data-view="logs">
+      <span class="nav-ico">≡</span><span data-i18n="nav.logs">Logs</span>
+    </button>
+    <button class="nav" data-view="diagnostics">
+      <span class="nav-ico">✓</span><span data-i18n="nav.diagnostics">Diagnostics</span>
+      <span id="nav-issues" class="nav-badge hidden"></span>
+    </button>
+  </nav>
+
+  <div class="main">
+    <header class="topbar" data-tauri-drag-region>
+      <div class="topsearch">
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <input id="search" type="text" data-i18n-placeholder="search.placeholder" placeholder="Search sites" spellcheck="false" />
+      </div>
+
+      <div class="topbar-right">
+        <div class="langpicker">
+          <button class="lang-btn" data-role="btn" aria-haspopup="menu" aria-expanded="false">
+            <span data-role="flag">🌐</span>
+            <span data-role="code"></span>
+            <svg viewBox="0 0 10 6" width="9" height="6" aria-hidden="true">
+              <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div class="lang-menu hidden" data-role="menu" role="menu"></div>
+        </div>
+
+        <div class="theme-switch" id="theme-seg">
+          <button data-theme="system" data-i18n-title="theme.auto" title="Match macOS">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/>
+            </svg>
+          </button>
+          <button data-theme="light" data-i18n-title="theme.light" title="Light">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <circle cx="8" cy="8" r="3.1" fill="currentColor"/>
+              <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                <path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7L13 13M13 3l-1.3 1.3M4.3 11.7L3 13"/>
+              </g>
+            </svg>
+          </button>
+          <button data-theme="dark" data-i18n-title="theme.dark" title="Dark">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path d="M13.2 10.3A5.6 5.6 0 0 1 5.7 2.8a5.8 5.8 0 1 0 7.5 7.5z" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <!-- Sites -->
+      <section class="view" data-view="sites">
+        <div class="view-head">
+          <div>
+            <h2 data-i18n="sites.title">Sites</h2>
+            <p class="muted" data-i18n="sites.subtitle">Local domains with trusted HTTPS.</p>
+          </div>
+          <button id="show-add" class="btn primary" data-i18n="sites.add">Add site</button>
+        </div>
+
+        <div id="add-panel" class="card add-card hidden">
+          <form id="add-form" autocomplete="off">
+            <div class="fields">
+              <label class="field">
+                <span data-i18n="add.domain">Domain</span>
+                <input id="domain" placeholder="mysite.test" spellcheck="false" required />
+                <small id="domain-hint"></small>
+              </label>
+              <label class="field">
+                <span data-i18n="add.target">Target</span>
+                <input id="target" placeholder="8000  ·  ~/Projects/my-app" spellcheck="false" required />
+                <small data-i18n="add.target.hint">A port, or a project folder.</small>
+              </label>
+            </div>
+            <div class="row">
+              <label class="check"><input type="checkbox" id="spa" /><span data-i18n="add.spa">SPA fallback</span></label>
+              <button type="button" id="test-btn" class="btn" data-i18n="add.test">Test</button>
+              <button type="button" id="cancel-add" class="btn ghost" data-i18n="add.cancel">Cancel</button>
+              <button type="submit" id="add-btn" class="btn primary" data-i18n="add.submit">Add site</button>
+            </div>
+          </form>
+          <p id="test-result" class="testresult hidden"></p>
+          <p id="add-error" class="error hidden"></p>
+        </div>
+
+        <div id="site-list" class="site-list"></div>
+        <div id="empty" class="empty hidden">
+          <div class="empty-art">◧</div>
+          <h3 data-i18n="sites.empty.title">No sites yet</h3>
+          <p data-i18n="sites.empty.body">Add a domain and point it at a port or a project folder.</p>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section class="view hidden" data-view="settings">
+        <div class="view-head">
+          <div>
+            <h2 data-i18n="settings.title">Settings</h2>
+            <p class="muted" data-i18n="settings.subtitle">Language and theme live in the top bar. Here: machine usage and updates.</p>
+          </div>
+        </div>
+
+        <h3 class="section-label" data-i18n="settings.mode">Mode</h3>
+        <div class="modes">
+          <button class="mode" data-mode="standalone">
+            <strong data-i18n="settings.mode.standalone.title">Standalone</strong>
+            <span data-i18n="settings.mode.standalone.body">No password, ever.</span>
+          </button>
+          <button class="mode" data-mode="system">
+            <strong data-i18n="settings.mode.system.title">System</strong>
+            <span data-i18n="settings.mode.system.body">One password, once.</span>
+          </button>
+        </div>
+
+        <h3 class="section-label" data-i18n="settings.tunnel">Public URLs</h3>
+        <div class="card setting">
+          <div class="setting-row">
+            <div>
+              <strong data-i18n="settings.tunnel.which">Which service to use</strong>
+              <span class="muted" data-i18n="settings.tunnel.body">Cloudflare needs no account.</span>
+            </div>
+            <div class="segmented" id="provider-seg">
+              <button data-provider="cloudflare">Cloudflare</button>
+              <button data-provider="ngrok">ngrok</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <strong>ngrok</strong>
+              <span class="muted" id="ngrok-detail">—</span>
+              <ol id="ngrok-steps" class="ngrok-steps hidden">
+                <li><code>brew install ngrok</code></li>
+                <li><a href="#" id="ngrok-signup">dashboard.ngrok.com/signup</a></li>
+                <li><code>ngrok config add-authtoken &lt;token&gt;</code></li>
+              </ol>
+            </div>
+            <button id="ngrok-check" class="btn small" data-i18n="ngrok.check">Check plan</button>
+          </div>
+
+          <div class="setting-row" id="ngrok-domain-row">
+            <div>
+              <strong data-i18n="ngrok.domain">Fixed hostname</strong>
+              <span class="muted" data-i18n="ngrok.domain.hint">Needs a paid ngrok plan.</span>
+            </div>
+            <input id="ngrok-domain" type="text" placeholder="hooks.example.com" spellcheck="false" />
+          </div>
+        </div>
+
+        <h3 class="section-label" data-i18n="settings.about">About</h3>
+        <div class="card about">
+          <div class="about-head">
+            <span class="mark lg"></span>
+            <div>
+              <strong>Portico <span id="about-version"></span></strong>
+              <span class="muted" data-i18n="settings.about.tagline">Local development domains with real HTTPS.</span>
+            </div>
+          </div>
+          <dl class="about-facts">
+            <div><dt data-i18n="settings.about.serving">Serving</dt><dd id="about-serving">—</dd></div>
+            <div><dt data-i18n="settings.about.tunnelling">Tunnelling</dt><dd id="about-tunnel">—</dd></div>
+            <div><dt data-i18n="settings.about.state">State</dt><dd><code>~/.portico</code></dd></div>
+          </dl>
+        </div>
+
+        <h3 class="section-label danger-label" data-i18n="settings.remove">Remove</h3>
+        <div class="card setting">
+          <div class="setting-row">
+            <div>
+              <strong data-i18n="settings.remove.title">Remove system changes</strong>
+              <span class="muted" data-i18n="settings.remove.body">Undoes the daemon, DNS and hosts entries.</span>
+            </div>
+            <button id="uninstall" class="btn danger small" data-i18n="settings.remove">Remove</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Logs -->
+      <section class="view hidden" data-view="logs">
+        <div class="view-head">
+          <div>
+            <h2 data-i18n="logs.title">Logs</h2>
+            <p class="muted" data-i18n="logs.subtitle">Everything Portico and its tools have written down.</p>
+          </div>
+          <div class="log-actions">
+            <button id="logs-clear" class="btn small" data-i18n="logs.clear">Clear</button>
+            <button id="logs-clear-all" class="btn danger small" data-i18n="logs.clearAll">Clear all</button>
+            <button id="logs-refresh" class="btn small" data-i18n="diag.recheck">Refresh</button>
+          </div>
+        </div>
+        <div class="logs-layout">
+          <ul id="log-list" class="log-list"></ul>
+          <pre id="log-body" class="log-body"></pre>
+        </div>
+      </section>
+
+      <!-- Diagnostics -->
+      <section class="view hidden" data-view="diagnostics">
+        <div class="view-head">
+          <div>
+            <h2 data-i18n="diag.title">Diagnostics</h2>
+            <p class="muted" data-i18n="diag.subtitle">Everything that must be true for a site to resolve and serve.</p>
+          </div>
+          <button id="recheck" class="btn" data-i18n="diag.recheck">Re-check</button>
+        </div>
+        <div class="card"><ul id="checks"></ul></div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<footer id="statusbar" class="statusbar hidden">
+  <button id="health-pill" class="status-left">
+    <span class="pill-dot"></span><span id="pill-text" data-i18n="status.checking">Checking…</span>
+  </button>
+  <div class="status-right">
+    <span id="status-mode" class="muted"></span>
+    <span id="status-sites" class="muted"></span>
+    <span id="side-version" class="muted"></span>
+  </div>
+</footer>
+
+<div id="toast" class="toast hidden"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

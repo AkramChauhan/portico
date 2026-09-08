@@ -1,0 +1,16 @@
+# Build output
+/target
+
+# Sidecar binaries are staged at build time by scripts/build-sidecar.sh
+/app/src-tauri/binaries/*
+!/app/src-tauri/binaries/.gitignore
+
+# Tauri generated schemas
+/app/src-tauri/gen/schemas
+
+# macOS
+.DS_Store
+
+# Local scratch
+/notes
+*.rs.bk

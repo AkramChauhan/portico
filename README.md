@@ -41,7 +41,7 @@ Requires **macOS** and a [Rust toolchain](https://rustup.rs) until signed builds
 Everything else Portico fetches itself.
 
 ```sh
-git clone https://github.com/akramchauhan/portico.git
+git clone https://github.com/AkramChauhan/portico.git
 cd portico
 cargo build --release
 

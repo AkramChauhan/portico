@@ -96,22 +96,28 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:
 /* ============================================================
    Title bar
    ============================================================ */
-/* The brand lives in the sidebar, under a spacer reserved for the macOS
-   traffic lights. That is what lets it share the navigation's left edge —
-   in the title bar it could never clear the lights and align with anything. */
-.sidebar-top { height: 34px; flex: none; }
+/* The brand lives in the sidebar so it shares the navigation's left edge; in
+   the title bar it could never clear the traffic lights and align with
+   anything. This spacer is NOT clearing those lights — titleBarStyle
+   "Transparent" keeps a 32px native bar and starts the webview below it, so
+   the buttons are never over the content. It was 34px on that mistaken
+   premise, which stacked 66px of dead air above the logo. 11px is measured:
+   it puts the brand's centre on the search field's (both 23.5px) and lands
+   its bottom edge on the top bar's, so the nav starts where content does. */
+.sidebar-top { height: 11px; flex: none; }
 
 .brand {
   display: flex; align-items: center; gap: 8px;
   padding: 0 9px 14px;      /* matches .nav's horizontal padding */
 }
-/* The real app icon, so the window matches its own Dock tile. The artwork
-   carries its own rounded-square shape, so no border-radius here. */
+/* The app icon, cropped tight to the tile. `icons/icon.png` keeps Apple's 18%
+   transparent margin because the Dock needs it; an inline mark does not, and
+   inheriting it made the brand look inset and undersized in its own box. */
 .mark {
-  width: 18px; height: 18px; flex: none;
-  background: url("logo.png") center / contain no-repeat;
+  width: 18px; height: 18px; flex: none; border-radius: 4.5px;
+  background: url("logo.png") center / cover no-repeat;
 }
-.mark.lg { width: 36px; height: 36px; }
+.mark.lg { width: 36px; height: 36px; border-radius: 9px; }
 .name { font-weight: 600; letter-spacing: -.01em; font-size: 13.5px; }
 
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -271,8 +277,8 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 }
 .ob-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 22px; }
 .ob-mark {
-  width: 42px; height: 42px; flex: none;
-  background: url("logo.png") center / contain no-repeat;
+  width: 42px; height: 42px; flex: none; border-radius: 10.5px;
+  background: url("logo.png") center / cover no-repeat;
 }
 .ob-head h1 { font-size: 18px; margin: 2px 0 3px; letter-spacing: -.02em; }
 .ob-head p { margin: 0; color: var(--muted); font-size: 13px; }

@@ -18,7 +18,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # check-freshness.mjs dates each document from `git log` and silently
           # falls back to file mtime without history — which on a fresh runner

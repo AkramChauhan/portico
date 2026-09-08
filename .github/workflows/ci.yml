@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A superseded run has nothing left to prove; let a new push cancel it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # macOS only, and not by preference: the crates link against the system
+    # Security framework and launchd, so there is nothing meaningful to run
+    # on another platform.
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # check-freshness.mjs dates each document from `git log` and silently
+          # falls back to file mtime without history — which on a fresh runner
+          # is checkout time, so every document would look current.
+          fetch-depth: 0
+
+      - name: Show toolchain
+        run: |
+          rustc --version
+          cargo --version
+          node --version
+
+      - name: Stage the hostsd sidecar
+        # binaries/ is gitignored, and tauri-build fails to resolve the
+        # externalBin entry without it — so portico-app cannot compile, and
+        # `cargo test` covers the whole workspace.
+        run: ./scripts/build-sidecar.sh
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Docs freshness
+        run: node docs/check-freshness.mjs

@@ -12,13 +12,16 @@
 
 pub mod bins;
 pub mod caddy;
+pub mod cloudflare;
 pub mod config;
 pub mod hosts;
+pub mod lan;
 pub mod monitor;
 pub mod ngrok;
 pub mod paths;
 pub mod runner;
 pub mod privileged;
+pub mod secrets;
 pub mod setup;
 pub mod target;
 pub mod update;
@@ -38,6 +41,8 @@ pub struct SiteView {
     /// False when the domain needs an /etc/hosts entry (custom TLD).
     pub wildcard_dns: bool,
     pub tunnel_state: tunnel::TunnelInfo,
+    /// Address other devices on this network can open, when exposed.
+    pub lan_url: Option<String>,
     pub run_state: runner::RunState,
     /// True when this site has a dev server we can start and stop.
     pub managed: bool,
@@ -49,6 +54,7 @@ fn view(cfg: &Config, site: &Site) -> SiteView {
         target_label: site.target.describe(),
         wildcard_dns: !cfg.needs_hosts_entry(&site.domain),
         tunnel_state: tunnel::status(&site.id),
+        lan_url: lan::url(site),
         run_state: runner::status(&site.id),
         managed: matches!(site.target, Target::Node { .. }),
         site: site.clone(),
@@ -212,6 +218,10 @@ pub fn add_site(
         ssl,
         spa,
         tunnel: false,
+        public_domain: String::new(),
+        tunnel_id: None,
+        lan: false,
+        lan_port: None,
         run,
     };
     cfg.sites.push(site);
@@ -327,6 +337,16 @@ pub fn remove_site(id: &str) -> anyhow::Result<()> {
     tunnel::stop(id);
     runner::stop(id);
     let mut cfg = Config::load();
+
+    // Hand back the hostname and the tunnel behind it. Doing this before the
+    // site is gone is the only chance we get: once it is out of the config,
+    // nothing knows the tunnel existed.
+    if let Some(site) = cfg.find(id) {
+        if site.tunnel_id.is_some() {
+            tunnel::deprovision(site);
+        }
+    }
+
     let before = cfg.sites.len();
     cfg.sites.retain(|s| s.id != id);
     if cfg.sites.len() == before {
@@ -353,22 +373,176 @@ pub fn set_spa(id: &str, on: bool) -> anyhow::Result<()> {
     apply(&cfg)
 }
 
+/// Serve this site to other devices on the same network, or stop doing so.
+///
+/// The port is assigned once and kept, so turning this off and on again hands
+/// back the same address rather than breaking a link already open elsewhere.
+pub fn set_lan(id: &str, on: bool) -> anyhow::Result<()> {
+    let mut cfg = Config::load();
+    if cfg.find(id).is_none() {
+        anyhow::bail!("No such site: {id}");
+    }
+
+    let port = if on {
+        Some(lan::assign_port(&cfg, id).ok_or_else(|| {
+            anyhow::anyhow!("No free port left for local network sharing")
+        })?)
+    } else {
+        cfg.find(id).and_then(|s| s.lan_port)
+    };
+
+    let site = cfg.find_mut(id).expect("site was present a moment ago");
+    site.lan = on;
+    site.lan_port = port;
+
+    // Same ordering as everywhere else: the listener has to exist before the
+    // config claims it does, or the app shows an address nothing answers on.
+    let updated = cfg.clone();
+    apply(&updated)?;
+    cfg.save()
+}
+
 pub fn set_tunnel(id: &str, on: bool) -> anyhow::Result<()> {
     let mut cfg = Config::load();
     let site = cfg
-        .find_mut(id)
-        .ok_or_else(|| anyhow::anyhow!("No such site: {id}"))?;
-    site.tunnel = on;
-    let domain = site.domain.clone();
+        .find(id)
+        .ok_or_else(|| anyhow::anyhow!("No such site: {id}"))?
+        .clone();
 
     // Start first, persist second. Saving `tunnel: true` before the process is
     // actually up left the toggle switched on with nothing running and no
     // error to show — which reads as the app having lost the site.
     if on {
-        tunnel::start(id, &domain)?;
+        // Claiming the hostname and pointing DNS at it comes before the agent
+        // runs, and before anything is written down: a tunnel id saved for a
+        // tunnel that was never created is a tunnel nothing can clean up.
+        let tunnel_id = tunnel::provision(&site)?;
+        let mut site = site;
+        if let Some(tid) = tunnel_id.clone() {
+            site.tunnel_id = Some(tid);
+        }
+        tunnel::start(&site)?;
+
+        let stored = cfg.find_mut(id).expect("site was present a moment ago");
+        stored.tunnel = true;
+        if let Some(tid) = tunnel_id {
+            stored.tunnel_id = Some(tid);
+        }
     } else {
         tunnel::stop(id);
+        cfg.find_mut(id).expect("site was present a moment ago").tunnel = false;
     }
+    cfg.save()
+}
+
+/// Give a site a stable public hostname, or take it away.
+///
+/// Changing the name means the old one must be given back: leaving a DNS
+/// record pointing at a tunnel that no longer serves it is a hostname that
+/// resolves to an error for as long as the user owns the domain.
+pub fn set_public_domain(id: &str, domain: &str) -> anyhow::Result<()> {
+    let wanted = domain.trim();
+    let normalised = if wanted.is_empty() {
+        String::new()
+    } else {
+        normalise_domain(wanted).map_err(|e| anyhow::anyhow!(e))?
+    };
+
+    let mut cfg = Config::load();
+    let site = cfg
+        .find(id)
+        .ok_or_else(|| anyhow::anyhow!("No such site: {id}"))?
+        .clone();
+
+    if site.public_domain == normalised {
+        return Ok(());
+    }
+    if !normalised.is_empty() {
+        if let Some(other) = cfg
+            .sites
+            .iter()
+            .find(|s| s.id != site.id && s.public_domain == normalised)
+        {
+            anyhow::bail!("{normalised} is already used by {}", other.domain);
+        }
+    }
+
+    // A running tunnel is serving the old name; stop it before the name moves.
+    tunnel::stop(id);
+    if site.tunnel_id.is_some() {
+        tunnel::deprovision(&site);
+    }
+
+    let stored = cfg.find_mut(id).expect("site was present a moment ago");
+    stored.public_domain = normalised;
+    stored.tunnel_id = None;
+    stored.tunnel = false;
+    cfg.save()
+}
+
+/// Which zones a stored Cloudflare token can write to.
+pub fn cloudflare_status() -> CloudflareStatus {
+    let Some(token) = secrets::get(secrets::CLOUDFLARE_TOKEN) else {
+        return CloudflareStatus {
+            connected: false,
+            account: None,
+            zones: Vec::new(),
+            detail: "Not connected — add an API token to use your own hostnames".into(),
+        };
+    };
+
+    match cloudflare::verify(&token) {
+        Ok(account) => {
+            // Cache the account id so starting a tunnel is one call shorter.
+            let mut cfg = Config::load();
+            if cfg.cloudflare_account.as_deref() != Some(account.id.as_str()) {
+                cfg.cloudflare_account = Some(account.id.clone());
+                let _ = cfg.save();
+            }
+            let detail = if account.zones.is_empty() {
+                "Connected, but this token can see no domains — it needs Zone:DNS:Edit".to_string()
+            } else {
+                format!("Connected to {} · {} domain(s)", account.name, account.zones.len())
+            };
+            CloudflareStatus {
+                connected: true,
+                account: Some(account.name),
+                zones: account.zones,
+                detail,
+            }
+        }
+        Err(e) => CloudflareStatus {
+            connected: false,
+            account: None,
+            zones: Vec::new(),
+            detail: e.to_string(),
+        },
+    }
+}
+
+/// Store a Cloudflare API token, but only one that actually works.
+///
+/// Verified before it is saved: a token that cannot see an account is not
+/// worth keeping, and finding that out now beats finding out when a site is
+/// turned public.
+pub fn connect_cloudflare(token: &str) -> anyhow::Result<CloudflareStatus> {
+    let token = token.trim();
+    let account = cloudflare::verify(token)?;
+    secrets::set(secrets::CLOUDFLARE_TOKEN, token)?;
+
+    let mut cfg = Config::load();
+    cfg.cloudflare_account = Some(account.id.clone());
+    cfg.save()?;
+
+    Ok(cloudflare_status())
+}
+
+/// Forget the stored token. Tunnels already created are left alone — they are
+/// on the user's account, and deleting them here would be a surprise.
+pub fn disconnect_cloudflare() -> anyhow::Result<()> {
+    secrets::delete(secrets::CLOUDFLARE_TOKEN);
+    let mut cfg = Config::load();
+    cfg.cloudflare_account = None;
     cfg.save()
 }
 
@@ -409,6 +583,16 @@ fn apply(cfg: &Config) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// What a stored Cloudflare token can reach.
+#[derive(Debug, Clone, Serialize)]
+pub struct CloudflareStatus {
+    pub connected: bool,
+    pub account: Option<String>,
+    /// Domains a hostname may be created under.
+    pub zones: Vec<cloudflare::Zone>,
+    pub detail: String,
 }
 
 /// User-facing preferences.
@@ -533,35 +717,43 @@ pub fn set_tunnel_provider(provider: ngrok::Provider) -> anyhow::Result<()> {
     cfg.save()
 }
 
-pub fn set_ngrok_domain(domain: &str) -> anyhow::Result<()> {
-    let d = domain.trim();
-    if d.len() > 253 || d.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        anyhow::bail!("Invalid domain");
-    }
-    let mut cfg = Config::load();
-    cfg.ngrok_domain = d.to_string();
-    cfg.save()
-}
-
 /// Start a short throwaway ngrok tunnel to learn which plan the account is on.
 ///
 /// The plan is not exposed to the agent, but the hostname it assigns gives it
 /// away: the free tier is always on ngrok-free.app.
-pub fn check_ngrok_plan() -> anyhow::Result<String> {
+///
+/// Doubles as the only real check that an authtoken works. ngrok has no
+/// "verify this token" endpoint we can call, so actually connecting is the
+/// test — which is why saving a token runs this too.
+fn probe_ngrok_plan() -> anyhow::Result<String> {
     use std::io::{BufRead, BufReader};
 
     let bin = ngrok::bin().ok_or_else(|| anyhow::anyhow!("ngrok is not installed"))?;
+    let token = ngrok::authtoken();
+
+    // Our own config file, so the probe tests the token we were given rather
+    // than one already sitting in ngrok's default config. Without this a bad
+    // token looked valid on any machine where a good one was already set up.
+    let mut args = ngrok::config_args();
+    args.extend(ngrok::tunnel_args(config::PLAIN_PORT, "portico.probe", None));
+
     let mut child = std::process::Command::new(bin)
-        .args(ngrok::tunnel_args(config::PLAIN_PORT, "portico.probe", None))
+        .args(&args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;
 
     let mut found = None;
+    let mut failure = None;
     if let Some(out) = child.stdout.take() {
         for line in BufReader::new(out).lines().map_while(Result::ok).take(60) {
             if let Some(url) = ngrok::extract_url(&line) {
                 found = Some(url);
+                break;
+            }
+            // ngrok quotes a rejected token back at us; never keep it.
+            if line.contains("ERR_NGROK") {
+                failure = Some(ngrok::redact(&line, token.as_deref()));
                 break;
             }
         }
@@ -569,8 +761,9 @@ pub fn check_ngrok_plan() -> anyhow::Result<String> {
     let _ = child.kill();
     let _ = child.wait();
 
-    let url = found.ok_or_else(|| {
-        anyhow::anyhow!("ngrok did not publish a URL — check that its authtoken is valid")
+    let url = found.ok_or_else(|| match failure {
+        Some(f) => anyhow::anyhow!("{f}"),
+        None => anyhow::anyhow!("ngrok did not publish a URL — check that its authtoken is valid"),
     })?;
     let plan = ngrok::plan_from_url(&url).to_string();
 
@@ -578,6 +771,40 @@ pub fn check_ngrok_plan() -> anyhow::Result<String> {
     cfg.ngrok_plan = Some(plan.clone());
     cfg.save()?;
     Ok(plan)
+}
+
+/// Store an ngrok authtoken, but only one that actually connects.
+///
+/// The token goes in first because the probe reads it from the keychain, and
+/// is taken back out if the probe fails — so a rejected token is never left
+/// behind looking configured.
+pub fn connect_ngrok(token: &str) -> anyhow::Result<ngrok::NgrokStatus> {
+    let token = token.trim();
+    if ngrok::bin().is_none() {
+        anyhow::bail!("ngrok is not installed — install it first, then add the token");
+    }
+    secrets::set(secrets::NGROK_AUTHTOKEN, token)?;
+
+    match probe_ngrok_plan() {
+        Ok(_) => Ok(ngrok_status()),
+        Err(e) => {
+            secrets::delete(secrets::NGROK_AUTHTOKEN);
+            ngrok::forget_config();
+            Err(e)
+        }
+    }
+}
+
+/// Forget the stored ngrok token.
+///
+/// A token the user added with `ngrok config add-authtoken` lives in ngrok's
+/// own file and is untouched — removing that is theirs to do.
+pub fn disconnect_ngrok() -> anyhow::Result<()> {
+    secrets::delete(secrets::NGROK_AUTHTOKEN);
+    ngrok::forget_config();
+    let mut cfg = Config::load();
+    cfg.ngrok_plan = None;
+    cfg.save()
 }
 
 pub fn tools_status() -> Vec<bins::ToolStatus> {
@@ -698,6 +925,10 @@ mod safety_tests {
             ssl: true,
             spa: false,
             tunnel: true,
+            public_domain: String::new(),
+            tunnel_id: None,
+            lan: false,
+            lan_port: None,
             run: false,
         }
     }

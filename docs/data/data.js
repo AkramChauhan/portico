@@ -14,7 +14,7 @@ window.DOCS = {
     { file: 'handbook.html', title: 'Engineering handbook', status: 'Current', owner: 'akramchauhan',
       updated: '2026-09-09',
       blurb: 'How a request reaches your project, what Portico changes on the machine, the risks that come with that, and the platform traps that look like arbitrary complexity until you know what they defend against.',
-      sources: ['core/src/caddy.rs', 'core/src/setup.rs', 'core/src/tunnel.rs', 'core/src/target.rs', 'core/src/runner.rs', 'core/src/lib.rs', 'hostsd/src/main.rs'] }
+      sources: ['core/src/caddy.rs', 'core/src/setup.rs', 'core/src/tunnel.rs', 'core/src/target.rs', 'core/src/runner.rs', 'core/src/lib.rs', 'core/src/cloudflare.rs', 'core/src/secrets.rs', 'core/src/lan.rs', 'hostsd/src/main.rs'] }
   ],
 
   /* Capability status. s: done | doing | todo | blocked */
@@ -45,8 +45,22 @@ window.DOCS = {
        + 'tauri-build cannot resolve externalBin and portico-app will not compile.' },
     { id: 'F12', s: 'todo', area: 'Interface',  t: 'Translate Rust-originated strings',
       d: 'Diagnostics labels, errors and the onboarding tool rows are still English in every language.' },
-    { id: 'F13', s: 'todo', area: 'Public URL', t: 'Named Cloudflare tunnels',
-      d: 'Would give a stable hostname without an ngrok account. Needs a domain on Cloudflare.' }
+    { id: 'F13', s: 'done', area: 'Public URL', t: 'Named Cloudflare tunnels',
+      d: 'A fixed hostname per site on a domain you own. Portico creates the tunnel through the API, '
+       + 'writes the CNAME, and runs it against the same loopback twin a quick tunnel uses. '
+       + 'The API token lives in the login keychain and never reaches argv.' },
+    { id: 'F14', s: 'done', area: 'Public URL', t: 'Fixed hostname is per site',
+      d: 'Was one global setting, which two simultaneously published sites silently fought over. '
+       + 'An older config migrates its value onto the first site that has none.' },
+    { id: 'F16', s: 'done', area: 'Public URL', t: 'Both providers take their token in-app',
+      d: 'Cloudflare and ngrok are entered in Settings and stored in the login keychain. '
+       + 'Neither secret passes through argv: Cloudflare goes to curl on stdin, ngrok into a '
+       + 'config file selected with --config. ngrok is verified by actually connecting, since '
+       + 'it offers no validation endpoint — which also reveals the plan, so no separate check '
+       + 'is needed. Neither token leaves the machine; Portico has no server to send them to.' },
+    { id: 'F15', s: 'done', area: 'Serving',    t: 'Local network sharing',
+      d: 'One plain-HTTP port per shared site, bound to every interface, addressed by IP so no '
+       + 'device needs DNS or a certificate. Off by default and stated plainly in the interface.' }
   ],
 
   /* EVERY belief that is not verified fact. */
@@ -103,7 +117,31 @@ window.DOCS = {
 
     { id: 'R08', risk: 'A public tunnel exposes whatever sits behind it, including apps with no authentication.',
       sev: 'Medium', area: 'Exposure', status: 'Mitigated',
-      mit: 'Tunnels are never restored automatically: the flag is cleared at launch, so an unclean exit cannot silently republish a private site under a URL the user never saw.' }
+      mit: 'Tunnels are never restored automatically: the flag is cleared at launch, so an unclean exit cannot silently republish a private site under a URL the user never saw.' },
+
+    { id: 'R09', risk: 'A LAN-shared site is reachable by anyone on the same network, over plain HTTP, and the setting survives a restart — including a move from home to a café.',
+      sev: 'Medium', area: 'Exposure', status: 'Accepted',
+      mit: 'Off by default and per site. Unlike a tunnel the address is stable and deliberately chosen, so clearing it at launch would break the one use it has. The interface states the café case next to the switch, and the site carries a badge while it is on.' },
+
+    { id: 'R10', risk: 'The Cloudflare API token can edit DNS and create tunnels on a real account.',
+      sev: 'Medium', area: 'Privilege', status: 'Mitigated',
+      mit: 'Stored in the login keychain, never in config.json (0644) and never in argv — security and curl both receive it on stdin. Verified before it is saved. Scope is the user’s to choose: Zone:DNS:Edit plus Account:Tunnel:Edit is enough.' },
+
+    { id: 'R11', risk: 'ngrok quotes a rejected authtoken back inside its own error text, which Portico captures into tunnel-<site>.log and shows in the app.',
+      sev: 'Medium', area: 'Exposure', status: 'Mitigated',
+      mit: 'Every line the agent prints is scrubbed of the token before it reaches the log file or the error surfaced in the interface. Found by feeding ngrok a deliberately bad token and reading what it printed.' },
+
+    { id: 'R12', risk: 'ngrok’s own config file takes precedence over NGROK_AUTHTOKEN, so on a machine that already had a token configured, an invalid one entered in Portico was accepted and stored.',
+      sev: 'Medium', area: 'Correctness', status: 'Fixed',
+      mit: 'The agent is now run with --config pointing at a file Portico writes (0600), which replaces the default instead of merging with it. The validation probe uses the same file, so it tests the token the user actually entered.' },
+
+    { id: 'R13', risk: 'In System mode Caddy binds 0.0.0.0:443, so every site is reachable from the local network by anyone who knows the hostname — with or without local network sharing switched on.',
+      sev: 'Medium', area: 'Exposure', status: 'Open',
+      mit: 'Predates the sharing feature: bind_line emits no bind directive in System mode. Standalone pins loopback and is unaffected. Confirmed with curl --resolve against the LAN address while every site had sharing off. A fix would bind the HTTPS listener to loopback and let the sharing toggle open the interface, at the cost of a second listener per site.' },
+
+    { id: 'R14', risk: 'Setting a fixed hostname on a name that already has a DNS record would overwrite it, pointing a live hostname at a laptop — and stamp it as Portico-managed, so clearing the hostname later deleted it outright.',
+      sev: 'Medium', area: 'Correctness', status: 'Fixed',
+      mit: 'upsert_dns now refuses any record whose comment does not mark it as ours, matching the guard delete_dns already had. The apex was the likely casualty, since an empty subdomain in the interface means the domain itself.' }
   ],
 
   glossary: [
@@ -111,6 +149,8 @@ window.DOCS = {
     { t: 'System mode', d: 'Caddy runs as a root LaunchDaemon and binds ports 80/443, giving port-free URLs. One authorisation at install. The default.' },
     { t: 'Standalone mode', d: 'Caddy runs as a user LaunchAgent on port 8443. Touches nothing outside the home folder except an /etc/hosts line for a custom domain.' },
     { t: 'Quick tunnel', d: 'An anonymous Cloudflare tunnel. No account, no domain — but a new random hostname on every restart.' },
+    { t: 'Named tunnel', d: 'A Cloudflare tunnel that Portico creates on your account, with a CNAME pointing at <id>.cfargotunnel.com. The hostname is yours and survives restarts, which is what a webhook registered days ago needs.' },
+    { t: 'LAN listener', d: 'One plain-HTTP port per shared site, bound to every interface. Addressed by IP because no other device can resolve a .test name or trust the local CA.' },
     { t: 'Hosts helper', d: 'portico-hostsd. A root binary launchd starts only when a specific request file changes; it rewrites one marked block of /etc/hosts and exits. Not a sudoers rule and not setuid.' },
     { t: 'Managed block', d: 'The region of /etc/hosts between Portico’s markers. Everything outside it is copied through untouched.' },
     { t: 'Sidecar', d: 'A helper binary bundled inside the .app. Tauri stages it from binaries/ with a target-triple suffix.' }

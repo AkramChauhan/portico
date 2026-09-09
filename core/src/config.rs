@@ -55,6 +55,39 @@ pub struct Site {
     /// Whether this site should have a public cloudflared tunnel running.
     #[serde(default)]
     pub tunnel: bool,
+    /// Stable public hostname for this site, on a domain the user owns.
+    ///
+    /// Empty means a quick tunnel: anonymous, and a new random hostname every
+    /// run. Set, it selects a *named* tunnel instead — the whole point being
+    /// that the URL you registered with Stripe last week still works today.
+    ///
+    /// This is per site rather than global because two sites cannot share one
+    /// hostname; a single setting meant the second site to go public silently
+    /// fought the first for it.
+    #[serde(default)]
+    pub public_domain: String,
+    /// Cloudflare's id for the named tunnel backing `public_domain`.
+    ///
+    /// Recorded so the tunnel and its DNS record can be torn down later. A
+    /// tunnel we cannot name is a tunnel we cannot delete, which would leave
+    /// the user to find it in the dashboard themselves.
+    #[serde(default)]
+    pub tunnel_id: Option<String>,
+    /// Whether this site answers on every network interface, not just
+    /// loopback, so other devices on the same network can reach it.
+    ///
+    /// Unlike a public tunnel this survives a restart: the address is stable
+    /// and the user picked it. It is still exposure — the network you are on
+    /// at a café is not the network you were on at home — so the interface
+    /// says so plainly rather than hiding it behind a badge.
+    #[serde(default)]
+    pub lan: bool,
+    /// The port this site holds on the LAN listener.
+    ///
+    /// Kept even while `lan` is off so that turning it back on returns the
+    /// same address, rather than invalidating a link left open on a phone.
+    #[serde(default)]
+    pub lan_port: Option<u16>,
     /// Whether Portico supervises this site's dev server. Only ever true
     /// for Node targets — everything else needs no process of its own.
     #[serde(default)]
@@ -66,6 +99,12 @@ fn default_true() -> bool {
 }
 
 impl Site {
+    /// The fixed hostname this site publishes on, if it has claimed one.
+    pub fn public_hostname(&self) -> Option<&str> {
+        let host = self.public_domain.trim();
+        (!host.is_empty()).then_some(host)
+    }
+
     pub fn url(&self, https_port: u16, http_port: u16) -> String {
         let (scheme, port, default) = if self.ssl {
             ("https", https_port, 443)
@@ -101,9 +140,17 @@ pub struct Config {
     /// Which service public URLs go through.
     #[serde(default)]
     pub tunnel_provider: crate::ngrok::Provider,
-    /// Optional fixed hostname for ngrok. Needs a paid plan.
+    /// Legacy single fixed hostname for ngrok, kept only so an existing
+    /// config keeps working. `Site::public_domain` replaces it and wins
+    /// wherever both are set; nothing writes this field any more.
     #[serde(default)]
     pub ngrok_domain: String,
+    /// Cloudflare account id, learned when a token is verified.
+    ///
+    /// Not a secret — the token itself is in the keychain — but caching it
+    /// saves a round trip every time a named tunnel starts.
+    #[serde(default)]
+    pub cloudflare_account: Option<String>,
     /// Last observed ngrok plan, learned from an assigned hostname.
     #[serde(default)]
     pub ngrok_plan: Option<String>,
@@ -150,6 +197,7 @@ impl Default for Config {
             tunnel_provider: crate::ngrok::Provider::default(),
             ngrok_domain: String::new(),
             ngrok_plan: None,
+            cloudflare_account: None,
             theme: default_theme(),
             language: default_language(),
             auto_update: true,
@@ -167,8 +215,38 @@ impl Config {
         let path = paths::config_file();
         std::fs::read_to_string(path)
             .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .and_then(|s| serde_json::from_str::<Config>(&s).ok())
             .unwrap_or_default()
+            .migrate()
+    }
+
+    /// Move a pre-per-site ngrok hostname onto the site that can use it.
+    ///
+    /// The old setting was global, so it could only ever have described one
+    /// site. Handing the same value to every site would recreate exactly the
+    /// collision that moving it here was meant to fix.
+    ///
+    /// Persisted the next time anything saves. If there is no site to take it
+    /// yet the value stays put rather than being dropped, so a hostname
+    /// configured before any site existed survives.
+    fn migrate(mut self) -> Config {
+        let legacy = self.ngrok_domain.trim().to_string();
+        if legacy.is_empty() {
+            return self;
+        }
+        // The old setter checked only length and whitespace, so this value is
+        // less validated than anything `set_public_domain` would accept — and
+        // it now reaches a URL query and a generated config. Re-check it, and
+        // drop it if it does not hold up.
+        let Ok(legacy) = normalise_domain(&legacy) else {
+            self.ngrok_domain.clear();
+            return self;
+        };
+        if let Some(site) = self.sites.iter_mut().find(|s| s.public_domain.trim().is_empty()) {
+            site.public_domain = legacy;
+            self.ngrok_domain.clear();
+        }
+        self
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -336,6 +414,10 @@ mod tests {
             ssl: true,
             spa: false,
             tunnel: false,
+            public_domain: String::new(),
+            tunnel_id: None,
+            lan: false,
+            lan_port: None,
             run: false,
         });
         assert_eq!(c.hosts_entries(), vec!["mywebsite.io".to_string()]);
@@ -363,7 +445,8 @@ mod tests {
         let s = Site {
             id: "a".into(), domain: "app.localhost".into(),
             target: crate::target::Target::Proxy { upstream: "127.0.0.1:1".into() },
-            ssl: true, spa: false, tunnel: false, run: false,
+            ssl: true, spa: false, tunnel: false,
+            public_domain: String::new(), tunnel_id: None, lan: false, lan_port: None, run: false,
         };
         assert_eq!(s.url(443, 80), "https://app.localhost");
         assert_eq!(s.url(8443, 8080), "https://app.localhost:8443");
@@ -395,5 +478,92 @@ mod tests {
         assert!(c.is_wildcard_resolved("mysite.test"));
         assert!(c.is_wildcard_resolved("api.mysite.test"));
         assert!(!c.is_wildcard_resolved("mywebsite.io"));
+    }
+
+    fn site_named(id: &str) -> Site {
+        Site {
+            id: id.into(),
+            domain: format!("{id}.test"),
+            target: crate::target::Target::Proxy { upstream: "127.0.0.1:1".into() },
+            ssl: true,
+            spa: false,
+            tunnel: false,
+            public_domain: String::new(),
+            tunnel_id: None,
+            lan: false,
+            lan_port: None,
+            run: false,
+        }
+    }
+
+    #[test]
+    fn a_legacy_global_hostname_lands_on_exactly_one_site() {
+        // The old setting was global, so it described one site at most.
+        // Copying it onto every site would recreate the collision that
+        // moving it per-site exists to fix.
+        let mut c = Config::default();
+        c.ngrok_domain = "hooks.example.com".into();
+        c.sites.push(site_named("first"));
+        c.sites.push(site_named("second"));
+
+        let c = c.migrate();
+        assert_eq!(c.sites[0].public_domain, "hooks.example.com");
+        assert_eq!(c.sites[1].public_domain, "", "the name must not be handed out twice");
+        assert_eq!(c.ngrok_domain, "", "the global must not be able to migrate again");
+    }
+
+    #[test]
+    fn migration_never_overwrites_a_hostname_a_site_already_has() {
+        let mut c = Config::default();
+        c.ngrok_domain = "legacy.example.com".into();
+        let mut first = site_named("first");
+        first.public_domain = "chosen.example.com".into();
+        c.sites.push(first);
+        c.sites.push(site_named("second"));
+
+        let c = c.migrate();
+        assert_eq!(c.sites[0].public_domain, "chosen.example.com");
+        assert_eq!(c.sites[1].public_domain, "legacy.example.com");
+    }
+
+    #[test]
+    fn a_legacy_hostname_that_is_not_a_valid_domain_is_dropped() {
+        // The removed global setter allowed anything without whitespace, and
+        // the value now reaches a URL query and a generated config file.
+        let mut c = Config::default();
+        c.ngrok_domain = "not a/valid:domain".into();
+        c.sites.push(site_named("first"));
+        let c = c.migrate();
+        assert_eq!(c.sites[0].public_domain, "", "an invalid legacy value must not be adopted");
+        assert_eq!(c.ngrok_domain, "", "and must not be retried on every load");
+    }
+
+    #[test]
+    fn a_legacy_hostname_survives_until_there_is_a_site_for_it() {
+        // Configured before any site existed. Dropping it here would lose a
+        // paid ngrok hostname the user had already set up.
+        let mut c = Config::default();
+        c.ngrok_domain = "hooks.example.com".into();
+        let c = c.migrate();
+        assert_eq!(c.ngrok_domain, "hooks.example.com");
+    }
+
+    #[test]
+    fn migration_is_idempotent() {
+        let mut c = Config::default();
+        c.ngrok_domain = "hooks.example.com".into();
+        c.sites.push(site_named("first"));
+        let c = c.migrate().migrate().migrate();
+        assert_eq!(c.sites[0].public_domain, "hooks.example.com");
+        assert_eq!(c.ngrok_domain, "");
+    }
+
+    #[test]
+    fn a_blank_hostname_is_no_hostname() {
+        let mut s = site_named("a");
+        s.public_domain = "   ".into();
+        assert!(s.public_hostname().is_none(), "whitespace must not select a named tunnel");
+        s.public_domain = "hooks.example.com".into();
+        assert_eq!(s.public_hostname(), Some("hooks.example.com"));
     }
 }

@@ -32,8 +32,8 @@
   --c1: #0E9E76; --c2: #6D4AE0; --c3: #2A6BC4; --c4: #B87A0B;
   --c5: #C7443F; --c6: #0E8C99; --c7: #8A5A2B; --c8: #7A8290;
 
-  --radius:   14px;
-  --radius-s: 9px;
+  --radius:   4px;
+  --radius-s: 3px;
   --shadow:   0 1px 2px rgba(18,22,30,.05), 0 8px 26px -14px rgba(18,22,30,.22);
   --shadow-l: 0 2px 4px rgba(18,22,30,.05), 0 22px 50px -26px rgba(18,22,30,.32);
 
@@ -71,7 +71,7 @@ a:hover { text-decoration-color: var(--accent); }
 .d-top .spacer { flex: 1; }
 .d-btn {
   font: inherit; font-size: 12.5px; font-weight: 550;
-  padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  padding: 6px 12px; border-radius: 3px; cursor: pointer;
   background: var(--surface); color: var(--ink-2);
   border: 1px solid var(--border); transition: .15s;
   display: inline-flex; align-items: center; gap: 6px;
@@ -87,7 +87,7 @@ a:hover { text-decoration-color: var(--accent); }
 }
 .d-side .toc-h { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); padding: 0 10px 10px; }
 .d-side a {
-  display: block; padding: 5px 10px; margin-bottom: 1px; border-radius: 7px;
+  display: block; padding: 5px 10px; margin-bottom: 1px; border-radius: 3px;
   font-size: 13.2px; line-height: 1.45; color: var(--muted);
   text-decoration: none; border-left: 2px solid transparent; transition: .12s;
 }
@@ -115,7 +115,7 @@ strong { color: var(--ink); font-weight: 620; }
 code {
   font-family: var(--mono); font-size: .87em; padding: 1.5px 5px;
   background: var(--bg-alt); border: 1px solid var(--border);
-  border-radius: 5px; color: var(--ink);
+  border-radius: 3px; color: var(--ink);
 }
 pre {
   font-family: var(--mono); font-size: 12.6px; line-height: 1.6;
@@ -220,7 +220,7 @@ figure.shot {
 }
 .shot-frame {
   position: relative;
-  border-radius: 14px;
+  border-radius: 4px;
   transform-style: preserve-3d;
   /* Flat and square at rest — the tilt is a response to the pointer, not the
      default state, so the shot still reads as a plain screenshot on arrival. */

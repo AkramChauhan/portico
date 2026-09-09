@@ -8,6 +8,13 @@
 //! It earns its place for people who already pay for it: a paid plan gives a
 //! stable hostname, which fixes the one real weakness of quick tunnels — the
 //! URL changing on every restart.
+//!
+//! The authtoken is entered in the app and kept in the login keychain, then
+//! handed to the agent through `NGROK_AUTHTOKEN` in its environment. Not
+//! `--authtoken`, which would put the secret in `argv` for any local process
+//! to read; and not `ngrok config add-authtoken`, which would do the same on
+//! the way to writing ngrok's own config file. A token the user added that
+//! way still works — it is simply found in the config file instead.
 
 use crate::paths;
 use serde::{Deserialize, Serialize};
@@ -18,8 +25,16 @@ use std::process::Command;
 pub struct NgrokStatus {
     pub installed: bool,
     pub path: Option<String>,
-    /// True when an authtoken is present, which is what the agent requires.
+    /// True when an authtoken is present from *either* source, which is what
+    /// the agent requires before it will start.
     pub configured: bool,
+    /// True only when Portico itself holds the token.
+    ///
+    /// The distinction matters to the interface: a token sitting in ngrok's
+    /// own config satisfies the agent but is not ours to remove, so offering
+    /// "Disconnect" for it is a button that cannot do anything — and hiding
+    /// the input field alongside it leaves no way to enter one at all.
+    pub token_stored: bool,
     pub config_path: Option<String>,
     /// "free", "paid" or None when no tunnel has been observed yet.
     pub plan: Option<String>,
@@ -86,11 +101,83 @@ pub fn extract_url(line: &str) -> Option<String> {
     url.starts_with("http").then_some(url)
 }
 
+/// The authtoken to run the agent with, if we hold one.
+///
+/// Only the copy we were given: a token in ngrok's own config file is found by
+/// the agent on its own and never needs to pass through here.
+pub fn authtoken() -> Option<String> {
+    crate::secrets::get(crate::secrets::NGROK_AUTHTOKEN)
+}
+
+/// Write the authtoken into a config file only this account can read, and
+/// return the arguments that make ngrok use it.
+///
+/// Empty when we hold no token, which leaves ngrok to find the user's own
+/// config exactly as it would without us.
+///
+/// This is deliberately not `NGROK_AUTHTOKEN`. That variable is read, but
+/// ngrok's default config file takes precedence over it — so with a token
+/// already in `~/Library/Application Support/ngrok/ngrok.yml`, the value we
+/// passed was silently ignored and a wrong token still appeared to work.
+/// `--config` replaces the default instead of merging with it, so what the
+/// user typed here is what actually runs.
+pub fn config_args() -> Vec<String> {
+    let Some(token) = authtoken() else {
+        return Vec::new();
+    };
+    match write_config(&token) {
+        Ok(path) => vec!["--config".to_string(), path.to_string_lossy().into_owned()],
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The config file contents.
+///
+/// Schema 3 nests the token under `agent`; a bare top-level `authtoken` is
+/// schema 2 and is rejected outright by a v3 agent with "field authtoken not
+/// found in type config.v3yamlConfig". Quoted because a YAML scalar starting
+/// with certain characters would otherwise change meaning — quotes themselves
+/// cannot appear, the charset check in `secrets` having already refused them.
+fn render_config(token: &str) -> String {
+    format!("version: \"3\"\nagent:\n  authtoken: \"{token}\"\n")
+}
+
+/// Write it 0600: it holds the authtoken in clear.
+fn write_config(token: &str) -> std::io::Result<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    crate::paths::ensure_dirs()?;
+    let path = crate::paths::ngrok_config();
+    std::fs::write(&path, render_config(token))?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(path)
+}
+
+/// Delete our config file. The user's own is never touched.
+pub fn forget_config() {
+    let _ = std::fs::remove_file(crate::paths::ngrok_config());
+}
+
+/// Remove `token` from text on its way to a log file or the interface.
+///
+/// ngrok quotes a rejected authtoken back in its own error — "Your authtoken:
+/// <value>" — and that error is written to `tunnel-<site>.log` and shown in
+/// the app. Without this, one mistyped token ends up in plaintext in a file
+/// that outlives the mistake.
+pub fn redact(text: &str, token: Option<&str>) -> String {
+    match token.filter(|t| !t.is_empty()) {
+        Some(t) => text.replace(t, "<authtoken redacted>"),
+        None => text.to_string(),
+    }
+}
+
 pub fn status(cached_plan: Option<&str>) -> NgrokStatus {
     let path = bin();
     let installed = path.is_some();
     let config_path = if installed { config_path() } else { None };
-    let configured = config_path.as_deref().is_some_and(has_authtoken);
+    // Either source counts: ours, or one the user added with the ngrok CLI
+    // before they ever opened this app.
+    let in_keychain = crate::secrets::has(crate::secrets::NGROK_AUTHTOKEN);
+    let configured = in_keychain || config_path.as_deref().is_some_and(has_authtoken);
 
     let plan = cached_plan.map(str::to_string);
     let paid = plan.as_deref() == Some("paid");
@@ -99,6 +186,10 @@ pub fn status(cached_plan: Option<&str>) -> NgrokStatus {
         "Not installed".to_string()
     } else if !configured {
         "Installed, but no authtoken — ngrok needs an account".to_string()
+    } else if !in_keychain {
+        // Working, but on a token we did not put there. Say so, rather than
+        // implying Portico is holding a credential it does not have.
+        "Ready · using the authtoken from ngrok's own config".to_string()
     } else {
         match plan.as_deref() {
             Some("paid") => "Ready · paid plan — custom domains available".to_string(),
@@ -111,6 +202,7 @@ pub fn status(cached_plan: Option<&str>) -> NgrokStatus {
         installed,
         path,
         configured,
+        token_stored: in_keychain,
         config_path,
         plan,
         custom_domain_supported: paid,
@@ -179,5 +271,52 @@ mod tests {
         // Whitespace-only must not become an empty --domain, which ngrok rejects.
         let blank = tunnel_args(8880, "site.io", Some("   "));
         assert!(!blank.iter().any(|a| a.starts_with("--domain=")));
+    }
+
+    #[test]
+    fn a_rejected_authtoken_is_scrubbed_before_it_reaches_a_log() {
+        // Verbatim shape of what ngrok prints when it dislikes a token: the
+        // token itself, quoted back. This line is written to
+        // tunnel-<site>.log and surfaced in the app, so the secret must not
+        // survive the trip.
+        let token = "2abcDEF_realLookingToken";
+        let line = format!(
+            "lvl=eror msg=\"authentication failed: The authtoken you specified does not look \
+             like a proper ngrok authtoken.\\nYour authtoken: {token}\\n\" ERR_NGROK_105"
+        );
+        let clean = redact(&line, Some(token));
+        assert!(!clean.contains(token), "the token survived redaction");
+        assert!(clean.contains("<authtoken redacted>"));
+        assert!(clean.contains("ERR_NGROK_105"), "the useful part must remain");
+    }
+
+    #[test]
+    fn redaction_is_a_no_op_without_a_token() {
+        // cloudflared output goes through the same writer; nothing to scrub.
+        let line = "lvl=info msg=\"started tunnel\"";
+        assert_eq!(redact(line, None), line);
+        assert_eq!(redact(line, Some("")), line);
+    }
+
+    #[test]
+    fn the_config_uses_the_schema_a_v3_agent_accepts() {
+        // A top-level `authtoken` is schema 2. A v3 agent refuses the whole
+        // file with "field authtoken not found in type config.v3yamlConfig",
+        // which reads as a Portico bug rather than a config one.
+        let out = render_config("2abcTOKEN_value");
+        assert!(out.contains("version: \"3\""));
+        assert!(out.contains("agent:"), "the token must be nested under agent");
+        assert!(out.contains("  authtoken: \"2abcTOKEN_value\""));
+        assert!(
+            !out.lines().any(|l| l.starts_with("authtoken:")),
+            "a top-level authtoken is the schema 2 form and would be rejected"
+        );
+    }
+
+    #[test]
+    fn an_authtoken_of_the_real_shape_is_accepted_for_storage() {
+        // ngrok authtokens are base62 with an underscore joining two halves.
+        // The charset guard exists for injection, and must not reject these.
+        assert!(crate::secrets::plausible("2abcDEFghi123JKL456mno_7PQRstu890VWXyz12AB"));
     }
 }

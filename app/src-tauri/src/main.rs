@@ -103,6 +103,41 @@ fn set_tunnel(id: String, on: bool) -> R<()> {
 }
 
 #[tauri::command]
+fn set_lan(id: String, on: bool) -> R<()> {
+    err(st::set_lan(&id, on))
+}
+
+#[tauri::command]
+fn set_public_domain(id: String, domain: String) -> R<()> {
+    err(st::set_public_domain(&id, &domain))
+}
+
+#[tauri::command]
+fn connect_ngrok(token: String) -> R<st::ngrok::NgrokStatus> {
+    err(st::connect_ngrok(&token))
+}
+
+#[tauri::command]
+fn disconnect_ngrok() -> R<()> {
+    err(st::disconnect_ngrok())
+}
+
+#[tauri::command]
+fn cloudflare_status() -> st::CloudflareStatus {
+    st::cloudflare_status()
+}
+
+#[tauri::command]
+fn connect_cloudflare(token: String) -> R<st::CloudflareStatus> {
+    err(st::connect_cloudflare(&token))
+}
+
+#[tauri::command]
+fn disconnect_cloudflare() -> R<()> {
+    err(st::disconnect_cloudflare())
+}
+
+#[tauri::command]
 fn settings() -> st::Settings {
     st::settings()
 }
@@ -130,16 +165,6 @@ fn ngrok_status() -> st::ngrok::NgrokStatus {
 #[tauri::command]
 fn set_tunnel_provider(provider: st::ngrok::Provider) -> R<()> {
     err(st::set_tunnel_provider(provider))
-}
-
-#[tauri::command]
-fn set_ngrok_domain(domain: String) -> R<()> {
-    err(st::set_ngrok_domain(&domain))
-}
-
-#[tauri::command]
-fn check_ngrok_plan() -> R<String> {
-    err(st::check_ngrok_plan())
 }
 
 #[tauri::command]
@@ -332,6 +357,13 @@ fn main() {
             set_ssl,
             set_spa,
             set_tunnel,
+            set_public_domain,
+            set_lan,
+            cloudflare_status,
+            connect_ngrok,
+            disconnect_ngrok,
+            connect_cloudflare,
+            disconnect_cloudflare,
             set_run,
             site_requests,
             site_health,
@@ -348,8 +380,6 @@ fn main() {
             tools_status,
             ngrok_status,
             set_tunnel_provider,
-            set_ngrok_domain,
-            check_ngrok_plan,
             check_updates,
             set_mode,
             set_mode_preference,

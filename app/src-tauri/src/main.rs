@@ -13,6 +13,25 @@ fn err<T>(r: anyhow::Result<T>) -> R<T> {
     r.map_err(|e| e.to_string())
 }
 
+/// Run blocking work off the main thread.
+///
+/// A synchronous `#[tauri::command]` executes on the main thread, which is the
+/// same thread that pumps the window's event loop — so a command that waits on
+/// launchd, downloads 44 MB, or holds an authorisation dialog freezes the UI
+/// and shows a spinning cursor. Worse, the progress events these commands emit
+/// cannot render while it is blocked, so the feedback built to prevent that
+/// exact impression never appeared.
+async fn off_thread<T, F>(work: F) -> R<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> R<T> + Send + 'static,
+{
+    match tauri::async_runtime::spawn_blocking(work).await {
+        Ok(v) => v,
+        Err(e) => Err(format!("background task failed: {e}")),
+    }
+}
+
 #[tauri::command]
 fn list_sites() -> Vec<st::SiteView> {
     st::list_sites()
@@ -124,13 +143,15 @@ fn check_ngrok_plan() -> R<String> {
 }
 
 #[tauri::command]
-fn tools_status() -> Vec<st::bins::ToolStatus> {
-    st::tools_status()
+async fn tools_status() -> Vec<st::bins::ToolStatus> {
+    off_thread(|| Ok(st::tools_status()))
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-fn check_updates() -> st::update::UpdateReport {
-    st::check_updates()
+async fn check_updates() -> R<st::update::UpdateReport> {
+    off_thread(|| Ok(st::check_updates())).await
 }
 
 #[tauri::command]
@@ -144,52 +165,57 @@ fn set_mode_preference(mode: st::config::Mode) -> R<()> {
 }
 
 #[tauri::command]
-fn set_mode(mode: st::config::Mode) -> R<String> {
-    err(st::set_mode(mode))
+async fn set_mode(mode: st::config::Mode) -> R<String> {
+    off_thread(move || err(st::set_mode(mode))).await
 }
 
 #[tauri::command]
-fn doctor() -> Vec<st::setup::Check> {
-    st::doctor()
+async fn doctor() -> Vec<st::setup::Check> {
+    off_thread(|| Ok(st::doctor())).await.unwrap_or_default()
 }
 
 /// Step one of the wizard: fetch tools, streaming progress to the UI.
 #[tauri::command]
-fn install_tools(app: AppHandle) -> R<Vec<st::bins::ToolStatus>> {
-    let a = app.clone();
-    let report = move |p: st::bins::Progress| {
-        let _ = a.emit("install-progress", p);
-    };
-    err(st::install_tools_reporting(&report))
+async fn install_tools(app: AppHandle) -> R<Vec<st::bins::ToolStatus>> {
+    off_thread(move || {
+        let report = move |p: st::bins::Progress| {
+            let _ = app.emit("install-progress", p);
+        };
+        err(st::install_tools_reporting(&report))
+    })
+    .await
 }
 
 /// Step two: the single authorisation.
 #[tauri::command]
-fn install_access() -> R<String> {
-    err(st::install_access())
+async fn install_access() -> R<String> {
+    off_thread(|| err(st::install_access())).await
 }
 
 #[tauri::command]
-fn run_setup(app: AppHandle) -> R<st::InstallReport> {
-    // Progress is pushed as events so the onboarding screen can show what is
-    // happening; a 44 MB download with no feedback reads as a hang.
-    let a = app.clone();
-    let report = move |p: st::bins::Progress| {
-        let _ = a.emit("install-progress", p);
-    };
-    let b = app.clone();
-    let phase = move |phase: &str, detail: &str| {
-        let _ = b.emit(
-            "install-phase",
-            serde_json::json!({ "phase": phase, "detail": detail }),
-        );
-    };
-    err(st::run_setup_reporting(&report, &phase))
+async fn run_setup(app: AppHandle) -> R<st::InstallReport> {
+    off_thread(move || {
+        // Progress is pushed as events so the onboarding screen can show what is
+        // happening; a 44 MB download with no feedback reads as a hang.
+        let a = app.clone();
+        let report = move |p: st::bins::Progress| {
+            let _ = a.emit("install-progress", p);
+        };
+        let b = app.clone();
+        let phase = move |phase: &str, detail: &str| {
+            let _ = b.emit(
+                "install-phase",
+                serde_json::json!({ "phase": phase, "detail": detail }),
+            );
+        };
+        err(st::run_setup_reporting(&report, &phase))
+    })
+    .await
 }
 
 #[tauri::command]
-fn run_uninstall() -> R<String> {
-    err(st::run_uninstall())
+async fn run_uninstall() -> R<String> {
+    off_thread(|| err(st::run_uninstall())).await
 }
 
 /// Build the menu-bar menu from current state.
@@ -216,7 +242,11 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )
     };
     owned.push(Box::new(MenuItem::with_id(
-        app, "status", summary, false, None::<&str>,
+        app,
+        "status",
+        summary,
+        false,
+        None::<&str>,
     )?));
     owned.push(Box::new(PredefinedMenuItem::separator(app)?));
 
@@ -243,10 +273,18 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         owned.push(Box::new(PredefinedMenuItem::separator(app)?));
     }
     owned.push(Box::new(MenuItem::with_id(
-        app, "show", "Open Portico", true, None::<&str>,
+        app,
+        "show",
+        "Open Portico",
+        true,
+        None::<&str>,
     )?));
     owned.push(Box::new(MenuItem::with_id(
-        app, "quit", "Quit", true, None::<&str>,
+        app,
+        "quit",
+        "Quit",
+        true,
+        None::<&str>,
     )?));
 
     let refs: Vec<&dyn IsMenuItem<Wry>> = owned.iter().map(|b| b.as_ref()).collect();
@@ -343,9 +381,8 @@ fn main() {
                         "show" => show_main_window(app),
                         _ => {
                             if let Some(url) = id.strip_prefix("open:") {
-                                let _ = std::process::Command::new("/usr/bin/open")
-                                    .arg(url)
-                                    .spawn();
+                                let _ =
+                                    std::process::Command::new("/usr/bin/open").arg(url).spawn();
                             }
                         }
                     }

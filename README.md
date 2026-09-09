@@ -1,5 +1,7 @@
 # Portico
 
+[![ci](https://github.com/AkramChauhan/portico/actions/workflows/ci.yml/badge.svg)](https://github.com/AkramChauhan/portico/actions/workflows/ci.yml)
+
 **Give any local project a real HTTPS address — and a public one when you need it.**
 
 A macOS app for local development domains. Point a name at a port or a project folder, get

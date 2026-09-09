@@ -24,8 +24,8 @@
   --danger-soft: #fef2f2;
   --sidebar-w: 200px;
   --status-h: 26px;
-  --radius: 10px;
-  --radius-lg: 14px;
+  --radius: 3px;
+  --radius-lg: 4px;
   --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 4px 14px rgba(16, 24, 40, .05);
   --shadow-lg: 0 8px 40px rgba(16, 24, 40, .12);
 }
@@ -114,10 +114,10 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:
    transparent margin because the Dock needs it; an inline mark does not, and
    inheriting it made the brand look inset and undersized in its own box. */
 .mark {
-  width: 18px; height: 18px; flex: none; border-radius: 4.5px;
+  width: 18px; height: 18px; flex: none; border-radius: 3px;
   background: url("logo.png") center / cover no-repeat;
 }
-.mark.lg { width: 36px; height: 36px; border-radius: 9px; }
+.mark.lg { width: 36px; height: 36px; border-radius: 3px; }
 .name { font-weight: 600; letter-spacing: -.01em; font-size: 13.5px; }
 
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -137,13 +137,13 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:
   display: flex; align-items: center; gap: 7px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 3px;
   padding: 0 10px; height: 28px;
   color: var(--faint);
 }
 .topsearch:focus-within { border-color: var(--accent); color: var(--accent); }
 .topsearch svg { flex: none; }
-/* Specific enough to beat the base `input[type=text]` rule further down. */
+/* Specific enough to beat the base text/password input rule further down. */
 .topsearch input[type="text"] {
   border: 0; background: none; padding: 0; height: 100%; border-radius: 0;
   font: inherit; font-size: 12.5px; color: var(--text); width: 100%;
@@ -172,7 +172,7 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:
   display: flex; align-items: center; gap: 9px;
   width: 100%;
   padding: 7px 9px;
-  border: 0; border-radius: 7px;
+  border: 0; border-radius: 3px;
   background: none; color: var(--muted);
   font: inherit; font-size: 13px; font-weight: 500;
   cursor: pointer;
@@ -220,7 +220,7 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
-  border-radius: 8px;
+  border-radius: 3px;
   padding: 6px 13px;
   font: inherit; font-size: 12.5px; font-weight: 500;
   cursor: pointer;
@@ -237,11 +237,11 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:
 .btn.lg { padding: 9px 22px; font-size: 13.5px; }
 .btn:disabled { opacity: .45; cursor: default; filter: none; }
 
-input[type=text], input:not([type]) {
+input[type=text], input[type=password], input:not([type]) {
   width: 100%;
   padding: 7px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 3px;
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
@@ -271,13 +271,13 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
   width: 100%; max-width: 540px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 4px;
   padding: 28px;
   box-shadow: var(--shadow-lg);
 }
 .ob-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 22px; }
 .ob-mark {
-  width: 42px; height: 42px; flex: none; border-radius: 10.5px;
+  width: 42px; height: 42px; flex: none; border-radius: 3px;
   background: url("logo.png") center / cover no-repeat;
 }
 .ob-head h1 { font-size: 18px; margin: 2px 0 3px; letter-spacing: -.02em; }
@@ -303,7 +303,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 .wiz-ask {
   margin: 13px 0 0; padding: 9px 11px;
   background: var(--accent-soft); color: var(--accent);
-  border-radius: 8px; font-size: 12.5px; line-height: 1.5;
+  border-radius: 3px; font-size: 12.5px; line-height: 1.5;
 }
 
 .ob-tools { list-style: none; margin: 15px 0 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
@@ -350,12 +350,20 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 .badges { display: flex; gap: 6px; margin-left: auto; align-items: center; }
 .badge {
   font-size: 10px; font-weight: 600; letter-spacing: .04em;
-  padding: 2px 6px; border-radius: 5px;
+  padding: 2px 6px; border-radius: 3px;
   background: var(--surface-2); color: var(--faint); border: 1px solid var(--border-soft);
 }
 .badge.ssl { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
 .badge.plain { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
 .badge.hosts { color: var(--faint); }
+/* A claimed hostname is the one badge that carries a value rather than a
+   label, so it keeps the monospace of the URLs it refers to. */
+.badge.lan { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.badge.public {
+  color: var(--accent); background: var(--accent-soft); border-color: transparent;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0;
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .site-target { color: var(--muted); font-size: 12px; margin-top: 4px; word-break: break-all; }
 
 .site-bottom {
@@ -374,8 +382,25 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
   background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s;
 }
 .switch input:checked + .track { background: var(--accent); }
+.switch.busy input:not(:checked) + .track::before {
+  border-color: var(--faint); border-top-color: var(--accent);
+}
 .switch input:checked + .track::after { transform: translateX(13px); }
 .run-failed span:last-child { color: var(--danger); }
+
+/* A switch that is working. The knob is hidden and a spinner turns inside the
+   track, so the control keeps its exact size and the row cannot reflow while
+   a tunnel comes up or Caddy reloads. */
+.switch.busy { cursor: default; }
+.switch.busy .track { opacity: .55; }
+.switch.busy .track::after { opacity: 0; }
+.switch.busy .track::before {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.45);
+  border-top-color: #fff;
+  animation: spin .7s linear infinite;
+}
 
 .tunnel-info { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-left: auto; }
 .tunnel-url {
@@ -389,6 +414,110 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
   animation: spin .7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* A button that is working. The label stays put and turns invisible so the
+   control keeps its width, and the spinner sits centred over it. */
+.btn.busy, .mode.busy { color: transparent !important; position: relative; pointer-events: none; }
+.btn.busy::after, .mode.busy::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+/* On a filled button the ring has to read against the accent background. */
+.btn.primary.busy::after, .btn.danger.busy::after {
+  border-color: rgba(255,255,255,.45); border-top-color: #fff;
+}
+
+/* ============================================================
+   One site
+   ============================================================ */
+.backlink {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--muted); font: inherit; font-size: 12.5px; margin-bottom: 14px;
+}
+.backlink:hover { color: var(--text); }
+
+.sitepage-head { display: flex; align-items: center; gap: 10px; }
+.site-url.lg { font-size: 19px; }
+.sitepage > .muted { font-size: 12.5px; margin: 2px 0 18px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+.sitepage-section { padding: 16px 18px; }
+.sitepage-section + .sitepage-section { margin-top: 12px; }
+.sitepage-section-head { margin-bottom: 14px; }
+.sitepage-section-head h3 { font-size: 14px; margin: 0; }
+.sitepage-section-head p { font-size: 12.5px; line-height: 1.55; margin: 5px 0 0; max-width: 62ch; }
+
+/* The two blocks that reach past this Mac carry a coloured edge, so the
+   difference between "my laptop" and "the internet" is visible at a glance
+   rather than only in the words. */
+.sitepage-lan { border-left: 3px solid var(--warn); }
+.sitepage-public { border-left: 3px solid var(--danger); }
+.sitepage-danger { border-left: 3px solid var(--danger); }
+
+.row-actions { display: flex; align-items: center; gap: 10px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.expose-state { display: flex; align-items: center; gap: 8px; }
+
+.public-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.public-row input {
+  width: 230px; max-width: 100%;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px;
+}
+
+/* The fixed hostname field.
+ *
+ * The part you choose and the domain you own belong to one name, so they are
+ * drawn as one field: a shared border that lights up together, with the
+ * domain sitting in it as a suffix rather than floating beside it as a
+ * separate control. Three loose boxes joined by a stray dot read as three
+ * unrelated inputs. */
+.setting-row.stacked { flex-direction: column; align-items: stretch; gap: 12px; }
+.setting-row.stacked > div:first-child { flex: none; }
+
+.host-field { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; }
+.host-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.host-input {
+  display: flex; align-items: stretch; min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+/* The whole field takes focus, not just the half being typed in. */
+.host-input:focus-within {
+  outline: 2px solid var(--accent); outline-offset: -1px;
+  border-color: transparent;
+}
+.host-input input {
+  border: 0; background: none; border-radius: 0;
+  width: 150px; min-width: 0; padding: 7px 10px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px;
+}
+.host-input input:focus { outline: none; }
+
+/* The chosen domain, set apart so it reads as fixed rather than typed. */
+.host-suffix {
+  display: flex; align-items: center;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+.host-zone {
+  border: 0; background: none; border-radius: 0; cursor: pointer;
+  padding: 7px 8px 7px 9px; max-width: 190px;
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px;
+}
+.host-zone:focus { outline: none; }
+
+.host-preview {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px; color: var(--accent); word-break: break-all;
+}
+.host-preview.empty { color: var(--faint); font-family: inherit; }
+
+.tiny { font-size: 11.5px; line-height: 1.5; }
 
 /* ============================================================
    Monitor
@@ -420,7 +549,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 .code-5 { color: var(--danger); font-weight: 600; min-width: 26px; }
 .src {
   font-size: 10px; color: var(--faint);
-  border: 1px solid var(--border-soft); border-radius: 4px;
+  border: 1px solid var(--border-soft); border-radius: 3px;
   padding: 0 5px; min-width: 46px; text-align: center;
 }
 .src.tunnel { color: var(--accent); border-color: transparent; background: var(--accent-soft); }
@@ -428,7 +557,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 .devlog {
   margin: 0; max-height: 170px; overflow: auto;
   background: var(--surface-2); border: 1px solid var(--border-soft);
-  border-radius: 8px; padding: 9px 11px;
+  border-radius: 3px; padding: 9px 11px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px; line-height: 1.5; white-space: pre-wrap; color: var(--muted);
 }
@@ -437,16 +566,48 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
    Settings
    ============================================================ */
 .setting + .setting { margin-top: 10px; }
-.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+/* The description and its control sit side by side while there is room. The
+   control has a fixed width, so without wrapping it squeezes the text into a
+   tall narrow column on a small window — the row stacks instead. */
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px 20px; flex-wrap: wrap;
+}
+.setting-row > div:first-child { flex: 1 1 300px; min-width: 0; }
 .setting-row + .setting-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
 .setting-row strong { display: block; font-size: 13px; }
-.setting-row span { display: block; font-size: 12px; margin-top: 2px; }
+.setting-row span { display: block; font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+#cf-tokens-link, #ngrok-token-link { overflow-wrap: anywhere; }
 .setting-actions { display: flex; gap: 8px; margin-top: 14px; }
 
-.segmented { display: flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; flex: none; }
+/* Cloudflare account row: a token field that collapses once connected, and
+   the zones the token can actually write to. */
+.cf-actions { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; flex-wrap: wrap; }
+.cf-actions input {
+  width: 220px; max-width: 100%;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+}
+.cf-zones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* Where the tokens actually live. Set apart from the rows above because it
+   answers a question about both of them, and it is the sort of thing people
+   want to read before typing a credential rather than after. */
+.setting-note {
+  margin: 14px 0 0; padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--muted); font-size: 12px; line-height: 1.55;
+}
+#cf-tokens-link { display: inline-block; margin-top: 4px; color: var(--accent); }
+.zone-chip {
+  font-size: 11px; padding: 2px 7px; border-radius: 3px;
+  background: var(--surface-2); color: var(--muted);
+  border: 1px solid var(--border-soft);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.segmented { display: flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 3px; padding: 2px; flex: none; }
 .segmented button {
   border: 0; background: none; color: var(--muted);
-  padding: 4px 13px; border-radius: 6px;
+  padding: 4px 13px; border-radius: 3px;
   font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
 }
 .segmented button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
@@ -492,7 +653,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 .testresult {
   margin: 12px 0 0; font-size: 12.5px;
   display: flex; align-items: center; gap: 7px;
-  padding: 8px 11px; border-radius: 8px;
+  padding: 8px 11px; border-radius: 3px;
 }
 .testresult.pass { background: var(--ok-soft); color: var(--ok); }
 .testresult.fail { background: var(--danger-soft); color: var(--danger); }
@@ -507,7 +668,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 .toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
   background: var(--text); color: var(--bg);
-  padding: 9px 16px; border-radius: 9px; font-size: 12.5px; font-weight: 500;
+  padding: 9px 16px; border-radius: 3px; font-size: 12.5px; font-weight: 500;
   box-shadow: var(--shadow-lg); z-index: 60; max-width: 70vw; text-align: center;
 }
 
@@ -520,12 +681,12 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 .theme-switch {
   display: flex; gap: 1px;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 7px; padding: 2px;
+  border-radius: 3px; padding: 2px;
 }
 .theme-switch button {
   display: grid; place-items: center;
   width: 24px; height: 20px;
-  border: 0; border-radius: 5px;
+  border: 0; border-radius: 3px;
   background: none; color: var(--faint);
   cursor: pointer; padding: 0;
 }
@@ -539,7 +700,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 .update-status.warn { color: var(--warn); }
 .update-status.err { color: var(--danger); }
 .udetail.skeleton {
-  display: inline-block; width: 170px; height: 11px; border-radius: 4px;
+  display: inline-block; width: 170px; height: 11px; border-radius: 3px;
   background: linear-gradient(90deg, var(--border-soft), var(--border), var(--border-soft));
   background-size: 200% 100%;
   animation: shimmer 1.2s linear infinite;
@@ -583,7 +744,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text);
-  border-radius: 8px;
+  border-radius: 3px;
   padding: 5px 10px;
   font: inherit; font-size: 12.5px;
   cursor: pointer;
@@ -599,7 +760,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--muted);
-  border-radius: 7px;
+  border-radius: 3px;
   font: inherit; font-size: 11.5px; font-weight: 600;
   cursor: pointer;
 }
@@ -612,14 +773,14 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
   min-width: 168px; padding: 5px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 3px;
   box-shadow: var(--shadow-lg);
   z-index: 50;
   max-height: 60vh; overflow-y: auto;
 }
 .lang-item {
   display: flex; align-items: center; gap: 9px; width: 100%;
-  padding: 6px 8px; border: 0; border-radius: 6px;
+  padding: 6px 8px; border: 0; border-radius: 3px;
   background: none; color: var(--text);
   font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
 }
@@ -644,7 +805,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
   font-style: normal; font-size: 9.5px; font-weight: 700;
   letter-spacing: .04em; text-transform: uppercase;
   color: var(--accent); background: var(--accent-soft);
-  border-radius: 4px; padding: 1px 5px;
+  border-radius: 3px; padding: 1px 5px;
 }
 .wiz-modes .mode.active .mode-tag { background: var(--surface); }
 
@@ -658,7 +819,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 }
 .log-item {
   display: block; width: 100%; text-align: left;
-  border: 0; border-radius: 7px; background: none; color: var(--text);
+  border: 0; border-radius: 3px; background: none; color: var(--text);
   padding: 7px 9px; font: inherit; font-size: 12.5px; cursor: pointer;
 }
 .log-item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
@@ -679,7 +840,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
 /* ── ngrok setup ───────────────────────────────────────────── */
 .ngrok-steps { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
 .ngrok-steps li { margin: 3px 0; }
-.ngrok-steps code { background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 5px; border-radius: 4px; }
+.ngrok-steps code { background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 5px; border-radius: 3px; }
 .ngrok-steps a { color: var(--accent); }
 #ngrok-domain { max-width: 240px; flex: none; }
 #ngrok-domain:disabled { opacity: .5; cursor: not-allowed; }

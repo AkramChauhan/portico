@@ -101,6 +101,23 @@ pub fn render(cfg: &Config) -> String {
         out.push_str(&error_block(site, 1));
         out.push_str("}\n\n");
 
+        // LAN listener: the same site on its own port, on every interface.
+        //
+        // Plain HTTP and no host matching, both deliberate. The certificate is
+        // signed by a CA only this Mac trusts, so HTTPS would warn on every
+        // other device; and a phone opening http://192.168.1.5:8801 sends the
+        // IP as the Host, which no hostname-matched block would answer.
+        if site.lan {
+            if let Some(port) = site.lan_port {
+                out.push_str(&format!("http://:{port} {{\n"));
+                out.push_str("\tbind 0.0.0.0\n");
+                out.push_str(&log_block(1));
+                out.push_str(&handler_block(site, 1));
+                out.push_str(&error_block(site, 1));
+                out.push_str("}\n\n");
+            }
+        }
+
         // Loopback plain-HTTP twin that cloudflared connects to. Same handler,
         // no TLS, so the tunnel never has to trust our local CA.
         out.push_str(&format!("http://{}:{} {{\n", site.domain, PLAIN_PORT));
@@ -316,6 +333,10 @@ mod tests {
             ssl,
             spa,
             tunnel: false,
+            public_domain: String::new(),
+            tunnel_id: None,
+            lan: false,
+            lan_port: None,
             run: false,
         }
     }
@@ -377,8 +398,48 @@ mod tests {
         assert!(out.contains("http://mysite.test:80 {"));
         assert!(!out.contains("tls internal"));
     }
-}
 
+    #[test]
+    fn a_site_is_never_reachable_off_this_mac_unless_asked() {
+        // The default must stay loopback-only. This is the check that a
+        // refactor cannot quietly turn every site into a LAN service.
+        let mut cfg = Config::default();
+        cfg.mode = Mode::Standalone;
+        cfg.sites.push(site(Target::Proxy { upstream: "127.0.0.1:8000".into() }, true, false));
+        let out = render(&cfg);
+        assert!(!out.contains("0.0.0.0"), "nothing should bind every interface by default");
+    }
+
+    #[test]
+    fn lan_exposure_opens_one_plain_http_port_on_every_interface() {
+        let mut cfg = Config::default();
+        cfg.mode = Mode::Standalone;
+        let mut s = site(Target::Proxy { upstream: "127.0.0.1:8000".into() }, true, false);
+        s.lan = true;
+        s.lan_port = Some(8801);
+        cfg.sites.push(s);
+        let out = render(&cfg);
+
+        assert!(out.contains("http://:8801 {"), "the LAN listener should exist");
+        assert!(out.contains("bind 0.0.0.0"), "it should answer on every interface");
+        // HTTPS here would warn on every device that does not trust our CA,
+        // and the block must not be hostname-matched or a phone opening the
+        // IP would get nothing.
+        assert!(!out.contains("https://:8801"), "the LAN listener must stay plain HTTP");
+    }
+
+    #[test]
+    fn a_lan_port_without_the_toggle_opens_nothing() {
+        // The port is remembered while exposure is off so the address comes
+        // back unchanged. Remembering it must not itself expose anything.
+        let mut cfg = Config::default();
+        let mut s = site(Target::Proxy { upstream: "127.0.0.1:8000".into() }, true, false);
+        s.lan = false;
+        s.lan_port = Some(8801);
+        cfg.sites.push(s);
+        assert!(!render(&cfg).contains(":8801"), "a remembered port must not listen");
+    }
+}
 
 #[cfg(test)]
 mod security_tests {
@@ -406,6 +467,10 @@ mod security_tests {
             ssl: true,
             spa: false,
             tunnel: false,
+            public_domain: String::new(),
+            tunnel_id: None,
+            lan: false,
+            lan_port: None,
             run: false,
         }
     }

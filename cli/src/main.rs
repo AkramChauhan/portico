@@ -20,6 +20,14 @@ USAGE
   portico requests <domain>              Recent requests the site handled
   portico health <domain>                Probe the site now
   portico tunnel <domain>                Expose it publicly; runs until Ctrl-C
+  portico public <domain> <host|off>     Give the site a fixed public hostname
+  portico lan <domain> on|off            Share it with other devices on your network
+  portico cloudflare status              Show what the stored API token can reach
+  portico cloudflare connect             Store an API token, read from stdin
+  portico cloudflare disconnect          Forget the stored token
+  portico ngrok connect                  Store an ngrok authtoken, read from stdin
+  portico ngrok status                   Show the ngrok account state
+  portico ngrok disconnect               Forget the stored authtoken
   portico uninstall                      Undo every system change
 
 ADD OPTIONS
@@ -30,6 +38,8 @@ TARGET can be a port (8000), a host:port (localhost:8000), or a folder (/path/to
 
 EXAMPLES
   portico test 8000
+  echo $CF_TOKEN | portico cloudflare connect
+  portico public mysite.test hooks.example.com
   portico add mysite.test 8000
   portico ssl mysite.test on
   portico add docs.test ~/Projects/docs-build --spa
@@ -117,6 +127,10 @@ fn run() -> anyhow::Result<()> {
             println!("{} {} ({} ms)", if h.ok { "UP  " } else { "DOWN" }, h.detail, h.ms);
         }
         "tunnel" => tunnel(&args[1..])?,
+        "public" => public(&args[1..])?,
+        "lan" => lan(&args[1..])?,
+        "cloudflare" | "cf" => cloudflare(&args[1..])?,
+        "ngrok" => ngrok_cmd(&args[1..])?,
         _ => print!("{USAGE}"),
     }
     Ok(())
@@ -198,6 +212,116 @@ fn add(args: &[String]) -> anyhow::Result<()> {
         println!("Mapped {} in /etc/hosts.", s.site.domain);
     }
     Ok(())
+}
+
+
+/// Give a site a fixed public hostname, or take it back.
+fn public(args: &[String]) -> anyhow::Result<()> {
+    let domain = args
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Usage: portico public <domain> <hostname|off>"))?;
+    let wanted = args
+        .get(1)
+        .ok_or_else(|| anyhow::anyhow!("Usage: portico public <domain> <hostname|off>"))?;
+    let id = st::config::slug(domain);
+
+    let hostname = if wanted == "off" || wanted == "none" { "" } else { wanted.as_str() };
+    st::set_public_domain(&id, hostname)?;
+
+    if hostname.is_empty() {
+        println!("{domain} is back to a temporary URL on each tunnel.");
+    } else {
+        println!("{domain} will publish on https://{hostname}");
+        println!("Run `portico tunnel {domain}` to bring it up.");
+    }
+    Ok(())
+}
+
+/// Share a site with other devices on the same network.
+fn lan(args: &[String]) -> anyhow::Result<()> {
+    let domain = args
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Usage: portico lan <domain> on|off"))?;
+    let on = matches!(args.get(1).map(String::as_str), Some("on"));
+    let id = st::config::slug(domain);
+    st::set_lan(&id, on)?;
+
+    if !on {
+        println!("{domain} is back to this Mac only.");
+        return Ok(());
+    }
+    match st::list_sites().into_iter().find(|s| s.site.id == id).and_then(|s| s.lan_url) {
+        Some(url) => {
+            println!("Anyone on your network can now open: {url}");
+            println!("Plain HTTP — other devices do not trust this Mac's certificate authority.");
+        }
+        None => println!("Shared, but this Mac has no network address right now."),
+    }
+    Ok(())
+}
+
+/// Cloudflare account plumbing: the token that makes fixed hostnames possible.
+fn cloudflare(args: &[String]) -> anyhow::Result<()> {
+    match args.first().map(String::as_str).unwrap_or("status") {
+        "status" => {
+            let s = st::cloudflare_status();
+            println!("{}", s.detail);
+            for z in &s.zones {
+                println!("  {}", z.name);
+            }
+            Ok(())
+        }
+        "connect" => {
+            // Read the token from stdin rather than a argument: everything in
+            // argv is visible to any local process through `ps`.
+            use std::io::Read;
+            let mut token = String::new();
+            std::io::stdin().read_to_string(&mut token)?;
+            if token.trim().is_empty() {
+                anyhow::bail!("No token on stdin. Try: echo $CF_TOKEN | portico cloudflare connect");
+            }
+            let s = st::connect_cloudflare(token.trim())?;
+            println!("{}", s.detail);
+            for z in &s.zones {
+                println!("  {}", z.name);
+            }
+            Ok(())
+        }
+        "disconnect" => {
+            st::disconnect_cloudflare()?;
+            println!("Token removed. Tunnels already created are left on your account.");
+            Ok(())
+        }
+        other => anyhow::bail!("Unknown: portico cloudflare {other}"),
+    }
+}
+
+/// ngrok account plumbing. Same shape as the Cloudflare command, because it
+/// is the same problem: a token that must not go through argv.
+fn ngrok_cmd(args: &[String]) -> anyhow::Result<()> {
+    match args.first().map(String::as_str).unwrap_or("status") {
+        "status" => {
+            println!("{}", st::ngrok_status().detail);
+            Ok(())
+        }
+        "connect" => {
+            use std::io::Read;
+            let mut token = String::new();
+            std::io::stdin().read_to_string(&mut token)?;
+            if token.trim().is_empty() {
+                anyhow::bail!("No token on stdin. Try: echo $NGROK_TOKEN | portico ngrok connect");
+            }
+            let s = st::connect_ngrok(token.trim())?;
+            println!("{}", s.detail);
+            Ok(())
+        }
+        "disconnect" => {
+            st::disconnect_ngrok()?;
+            println!("Token removed from the keychain.");
+            Ok(())
+        }
+        other => anyhow::bail!("Unknown: portico ngrok {other}"),
+    }
 }
 
 fn tunnel(args: &[String]) -> anyhow::Result<()> {

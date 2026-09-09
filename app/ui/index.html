@@ -194,6 +194,12 @@
         </div>
       </section>
 
+      <!-- One site: everything that belongs to it, including exposing it publicly. -->
+      <section class="view hidden" data-view="site">
+        <button id="site-back" class="backlink">&larr; <span data-i18n="site.back">All sites</span></button>
+        <div id="site-page"></div>
+      </section>
+
       <!-- Settings -->
       <section class="view hidden" data-view="settings">
         <div class="view-head">
@@ -235,19 +241,33 @@
               <ol id="ngrok-steps" class="ngrok-steps hidden">
                 <li><code>brew install ngrok</code></li>
                 <li><a href="#" id="ngrok-signup">dashboard.ngrok.com/signup</a></li>
-                <li><code>ngrok config add-authtoken &lt;token&gt;</code></li>
               </ol>
+              <span class="muted tiny" data-i18n="ngrok.hint">Your authtoken from the ngrok dashboard.</span>
+              <a href="#" id="ngrok-token-link" class="tiny">dashboard.ngrok.com/get-started/your-authtoken</a>
             </div>
-            <button id="ngrok-check" class="btn small" data-i18n="ngrok.check">Check plan</button>
+            <div class="cf-actions">
+              <input id="ngrok-token" type="password" placeholder="authtoken" spellcheck="false" autocomplete="off" />
+              <button id="ngrok-connect" class="btn small" data-i18n="ngrok.connect">Connect</button>
+              <button id="ngrok-disconnect" class="btn ghost small hidden" data-i18n="ngrok.disconnect">Disconnect</button>
+            </div>
           </div>
 
-          <div class="setting-row" id="ngrok-domain-row">
+          <div class="setting-row" id="cloudflare-row">
             <div>
-              <strong data-i18n="ngrok.domain">Fixed hostname</strong>
-              <span class="muted" data-i18n="ngrok.domain.hint">Needs a paid ngrok plan.</span>
+              <strong data-i18n="cf.account">Cloudflare account</strong>
+              <span class="muted" id="cf-detail">—</span>
+              <div id="cf-zones" class="cf-zones"></div>
+              <span class="muted tiny" data-i18n="cf.hint">A token with Zone:DNS:Edit and Account:Tunnel:Edit.</span>
+              <a href="#" id="cf-tokens-link" class="tiny">dash.cloudflare.com/profile/api-tokens</a>
             </div>
-            <input id="ngrok-domain" type="text" placeholder="hooks.example.com" spellcheck="false" />
+            <div class="cf-actions">
+              <input id="cf-token" type="password" placeholder="API token" spellcheck="false" autocomplete="off" />
+              <button id="cf-connect" class="btn small" data-i18n="cf.connect">Connect</button>
+              <button id="cf-disconnect" class="btn ghost small hidden" data-i18n="cf.disconnect">Disconnect</button>
+            </div>
           </div>
+
+          <p class="setting-note" data-i18n="tokens.local">Both tokens are kept in this Mac&rsquo;s login keychain, on this machine only. Portico has no account and no server of its own, so nothing is uploaded anywhere — the token is used to reach Cloudflare or ngrok directly.</p>
         </div>
 
         <h3 class="section-label" data-i18n="settings.about">About</h3>

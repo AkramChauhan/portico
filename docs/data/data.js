@@ -14,7 +14,7 @@ window.DOCS = {
     { file: 'handbook.html', title: 'Engineering handbook', status: 'Current', owner: 'akramchauhan',
       updated: '2026-09-09',
       blurb: 'How a request reaches your project, what Portico changes on the machine, the risks that come with that, and the platform traps that look like arbitrary complexity until you know what they defend against.',
-      sources: ['core/src/caddy.rs', 'core/src/setup.rs', 'core/src/tunnel.rs', 'core/src/target.rs', 'core/src/lib.rs', 'hostsd/src/main.rs'] }
+      sources: ['core/src/caddy.rs', 'core/src/setup.rs', 'core/src/tunnel.rs', 'core/src/target.rs', 'core/src/runner.rs', 'core/src/lib.rs', 'hostsd/src/main.rs'] }
   ],
 
   /* Capability status. s: done | doing | todo | blocked */
@@ -39,8 +39,10 @@ window.DOCS = {
       d: 'A root helper started by launchd WatchPaths. After install, adding or removing a domain never prompts.' },
     { id: 'F10', s: 'done', area: 'Interface',  t: 'Ten languages',
       d: '124 keys each, parity enforced. Frontend only — see R07.' },
-    { id: 'F11', s: 'todo', area: 'Release',    t: 'Continuous integration',
-      d: 'No workflow yet. cargo test on macOS before the first external PR.' },
+    { id: 'F11', s: 'done', area: 'Release',    t: 'Continuous integration',
+      d: 'cargo test and the docs freshness check on macos-latest, per push and PR. '
+       + 'Stages the hostsd sidecar first; binaries/ is gitignored, so without it '
+       + 'tauri-build cannot resolve externalBin and portico-app will not compile.' },
     { id: 'F12', s: 'todo', area: 'Interface',  t: 'Translate Rust-originated strings',
       d: 'Diagnostics labels, errors and the onboarding tool rows are still English in every language.' },
     { id: 'F13', s: 'todo', area: 'Public URL', t: 'Named Cloudflare tunnels',

@@ -164,8 +164,9 @@ you change**, and **anything touching a privileged path needs a test showing it 
 not just that it works. `CLAUDE.md` lists the conventions that exist for a reason — each
 one is there because its absence caused a bug.
 
-Open items if you are looking for something to pick up: CI, translating the Rust-side
-strings, and named Cloudflare tunnels for stable hostnames.
+Open items if you are looking for something to pick up: translating the Rust-side
+strings, named Cloudflare tunnels for stable hostnames, and getting `cargo fmt --check`
+and `cargo clippy -D warnings` clean enough to add to CI.
 
 ## License
 

@@ -112,13 +112,14 @@ portico uninstall                  # undo every system change
 
 ## Documentation
 
-Open **[`docs/index.html`](docs/index.html)** — the engineering handbook covers how a
-request reaches your project, what Portico changes on the machine, the risk register, and
-the platform traps behind the odd-looking code.
+**[akramchauhan.github.io/portico](https://akramchauhan.github.io/portico/index.html)** —
+the engineering handbook covers how a request reaches your project, what Portico changes on
+the machine, the risk register, and the platform traps behind the odd-looking code.
 
-Documentation is interactive HTML with no dependencies; open it from disk. Shared facts
-live in `docs/data/data.js` and are rendered rather than restated, and
-`node docs/check-freshness.mjs` reports when a document has fallen behind the code it
+The docs are interactive HTML with no dependencies, published from `docs/` on every push to
+`main`. They work equally well opened straight from disk, which is the point of having no
+build step. Shared facts live in `docs/data/data.js` and are rendered rather than restated,
+and `node docs/check-freshness.mjs` reports when a document has fallen behind the code it
 describes.
 
 ## Security in one paragraph
@@ -129,8 +130,8 @@ running as you the permanent ability to point a hostname at loopback — bounded
 that, with a strict allowlist and no path to root code execution. Caddy's admin API is
 unauthenticated on loopback and drives that root daemon, which is the largest open risk.
 All of it is removable with `portico uninstall`. The
-[handbook](docs/index.html) states the full model, including what is accepted rather than
-solved.
+[handbook](https://akramchauhan.github.io/portico/handbook.html) states the full model,
+including what is accepted rather than solved.
 
 Found something? Open an issue — or for anything sensitive, contact the maintainer directly
 rather than filing publicly.

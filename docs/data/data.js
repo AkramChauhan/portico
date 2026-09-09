@@ -133,7 +133,15 @@ window.DOCS = {
 
     { id: 'R12', risk: 'ngrok’s own config file takes precedence over NGROK_AUTHTOKEN, so on a machine that already had a token configured, an invalid one entered in Portico was accepted and stored.',
       sev: 'Medium', area: 'Correctness', status: 'Fixed',
-      mit: 'The agent is now run with --config pointing at a file Portico writes (0600), which replaces the default instead of merging with it. The validation probe uses the same file, so it tests the token the user actually entered.' }
+      mit: 'The agent is now run with --config pointing at a file Portico writes (0600), which replaces the default instead of merging with it. The validation probe uses the same file, so it tests the token the user actually entered.' },
+
+    { id: 'R13', risk: 'In System mode Caddy binds 0.0.0.0:443, so every site is reachable from the local network by anyone who knows the hostname — with or without local network sharing switched on.',
+      sev: 'Medium', area: 'Exposure', status: 'Open',
+      mit: 'Predates the sharing feature: bind_line emits no bind directive in System mode. Standalone pins loopback and is unaffected. Confirmed with curl --resolve against the LAN address while every site had sharing off. A fix would bind the HTTPS listener to loopback and let the sharing toggle open the interface, at the cost of a second listener per site.' },
+
+    { id: 'R14', risk: 'Setting a fixed hostname on a name that already has a DNS record would overwrite it, pointing a live hostname at a laptop — and stamp it as Portico-managed, so clearing the hostname later deleted it outright.',
+      sev: 'Medium', area: 'Correctness', status: 'Fixed',
+      mit: 'upsert_dns now refuses any record whose comment does not mark it as ours, matching the guard delete_dns already had. The apex was the likely casualty, since an empty subdomain in the interface means the domain itself.' }
   ],
 
   glossary: [

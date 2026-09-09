@@ -234,6 +234,14 @@ impl Config {
         if legacy.is_empty() {
             return self;
         }
+        // The old setter checked only length and whitespace, so this value is
+        // less validated than anything `set_public_domain` would accept — and
+        // it now reaches a URL query and a generated config. Re-check it, and
+        // drop it if it does not hold up.
+        let Ok(legacy) = normalise_domain(&legacy) else {
+            self.ngrok_domain.clear();
+            return self;
+        };
         if let Some(site) = self.sites.iter_mut().find(|s| s.public_domain.trim().is_empty()) {
             site.public_domain = legacy;
             self.ngrok_domain.clear();
@@ -516,6 +524,18 @@ mod tests {
         let c = c.migrate();
         assert_eq!(c.sites[0].public_domain, "chosen.example.com");
         assert_eq!(c.sites[1].public_domain, "legacy.example.com");
+    }
+
+    #[test]
+    fn a_legacy_hostname_that_is_not_a_valid_domain_is_dropped() {
+        // The removed global setter allowed anything without whitespace, and
+        // the value now reaches a URL query and a generated config file.
+        let mut c = Config::default();
+        c.ngrok_domain = "not a/valid:domain".into();
+        c.sites.push(site_named("first"));
+        let c = c.migrate();
+        assert_eq!(c.sites[0].public_domain, "", "an invalid legacy value must not be adopted");
+        assert_eq!(c.ngrok_domain, "", "and must not be retried on every load");
     }
 
     #[test]

@@ -155,6 +155,12 @@ fn write_named_config(site: &Site, tunnel: &crate::cloudflare::Tunnel, account_i
 /// Returns `None` when this site does not want a named tunnel, which leaves
 /// the caller on the anonymous quick-tunnel path.
 pub fn provision(site: &Site) -> anyhow::Result<Option<String>> {
+    // The id builds filenames. Stored ids are always slugified from a
+    // validated domain, so this cannot fire today — it is here so a
+    // hand-edited config.json cannot walk out of the directory either.
+    if !crate::paths::safe_id(&site.id) {
+        anyhow::bail!("Invalid site id");
+    }
     let cfg = crate::config::Config::load();
     if cfg.tunnel_provider != crate::ngrok::Provider::Cloudflare {
         return Ok(None);
@@ -245,6 +251,9 @@ fn rewrite_ingress(site: &Site, tunnel_id: &str, hostname: &str) -> anyhow::Resu
 /// network blip must not block that. Anything left behind is visible in the
 /// Cloudflare dashboard under the `portico-` prefix.
 pub fn deprovision(site: &Site) {
+    if !crate::paths::safe_id(&site.id) {
+        return;
+    }
     let Some(tunnel_id) = site.tunnel_id.clone() else { return };
     let cfg = crate::config::Config::load();
     let Some(token) = crate::secrets::get(crate::secrets::CLOUDFLARE_TOKEN) else { return };
@@ -280,6 +289,9 @@ pub fn connection_registered(line: &str) -> bool {
 /// the process starts, so there is nothing to scrape out of the log and the
 /// UI can show the address immediately.
 pub fn start(site: &Site) -> anyhow::Result<()> {
+    if !crate::paths::safe_id(&site.id) {
+        anyhow::bail!("Invalid site id");
+    }
     stop(&site.id);
 
     let cfg = crate::config::Config::load();

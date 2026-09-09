@@ -262,7 +262,7 @@
     <div class="t-scroll"><table>
       <thead><tr><th>Tier</th><th>Who can reach it</th><th>Address</th><th>TLS</th></tr></thead>
       <tbody>
-        <tr><td>Local</td><td>This Mac only</td><td><code>https://shop.test</code></td><td>Portico&rsquo;s own CA, trusted here</td></tr>
+        <tr><td>Local</td><td>This Mac &mdash; <b>plus anyone on the network who knows the hostname</b>, in System mode</td><td><code>https://shop.test</code></td><td>Portico&rsquo;s own CA, trusted here</td></tr>
         <tr><td>Local network</td><td>Anyone on the same network</td><td><code>http://192.168.1.5:8801</code></td><td><span class="badge amber dot">None</span> &mdash; plain HTTP</td></tr>
         <tr><td>Public</td><td>The entire internet</td><td><code>https://hooks.example.com</code></td><td>Publicly trusted, via Cloudflare</td></tr>
       </tbody>
@@ -280,6 +280,15 @@
     minutes&rdquo;. Plain HTTP for the same reason: the certificate is signed by an authority
     that exists only in this Mac&rsquo;s trust store, so every other device would warn. A
     padlock that has to be explained is worse than no padlock.</p>
+
+    <p><b>The first row has a caveat that predates this feature.</b> In System mode Caddy binds
+    <code>0.0.0.0:443</code>, because <code>bind_line</code> emits no <code>bind</code> directive
+    there &mdash; only Standalone pins loopback. A machine on the same network that resolves
+    <code>shop.test</code> to this Mac, or simply sends the right <code>Host</code> header to its
+    IP, is served the site whether or not sharing is switched on. Verified: with <code>lan</code>
+    false on every site, <code>curl --resolve</code> against the LAN address returns 200. What the
+    sharing toggle adds is a port that answers <em>without</em> the right hostname, and an address
+    the user can hand out. It does not open the machine; System mode already did.</p>
 
     <p>Unlike a public tunnel, this survives a restart. A quick tunnel is cleared at launch
     because its hostname is random and the user has never seen it; a LAN port is stable and

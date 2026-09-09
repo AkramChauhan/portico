@@ -285,9 +285,23 @@ pub fn upsert_dns(token: &str, zone_id: &str, hostname: &str, tunnel_id: &str) -
     });
 
     match existing_record(token, zone_id, hostname)? {
-        Some(record_id) => {
-            api(token, "PUT", &format!("/zones/{zone_id}/dns_records/{record_id}"), Some(&body))?;
+        // Ours to move: it already points at a tunnel we made.
+        Some(record) if record.ours => {
+            let id = record.id;
+            api(token, "PUT", &format!("/zones/{zone_id}/dns_records/{id}"), Some(&body))?;
         }
+        // Somebody else's. Refuse.
+        //
+        // `delete_dns` already declines to remove a record it did not create,
+        // and overwriting one is the worse half of that same mistake: the PUT
+        // both replaces a live record with a tunnel to a laptop *and* stamps
+        // it as Portico's, so clearing the hostname later would delete it
+        // outright rather than put it back. The apex is the likely casualty,
+        // since an empty first part in the interface means the domain itself.
+        Some(_) => anyhow::bail!(
+            "{hostname} already has a DNS record Portico did not create. \
+             Pick another name, or remove that record in Cloudflare first."
+        ),
         None => {
             api(token, "POST", &format!("/zones/{zone_id}/dns_records"), Some(&body))?;
         }
@@ -295,19 +309,39 @@ pub fn upsert_dns(token: &str, zone_id: &str, hostname: &str, tunnel_id: &str) -
     Ok(())
 }
 
-fn existing_record(token: &str, zone_id: &str, hostname: &str) -> anyhow::Result<Option<String>> {
+/// A DNS record already sitting on a hostname, and whether we put it there.
+struct Existing {
+    id: String,
+    ours: bool,
+}
+
+/// Whether a record carries our marker. The comment is the only thing that
+/// distinguishes a record Portico created from one that was already there.
+fn is_ours(record: &serde_json::Value) -> bool {
+    record
+        .get("comment")
+        .and_then(|c| c.as_str())
+        .is_some_and(|c| c.contains("Portico"))
+}
+
+fn existing_record(
+    token: &str,
+    zone_id: &str,
+    hostname: &str,
+) -> anyhow::Result<Option<Existing>> {
     let result = api(
         token,
         "GET",
         &format!("/zones/{zone_id}/dns_records?name={hostname}"),
         None,
     )?;
-    Ok(result
-        .as_array()
-        .and_then(|a| a.first())
-        .and_then(|r| r.get("id"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string))
+    let Some(record) = result.as_array().and_then(|a| a.first()) else {
+        return Ok(None);
+    };
+    let Some(id) = record.get("id").and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
+    Ok(Some(Existing { id: id.to_string(), ours: is_ours(record) }))
 }
 
 /// Remove the DNS record for a hostname, but only if Portico created it.
@@ -326,11 +360,7 @@ pub fn delete_dns(token: &str, zone_id: &str, hostname: &str) -> anyhow::Result<
         return Ok(());
     };
 
-    let ours = record
-        .get("comment")
-        .and_then(|c| c.as_str())
-        .is_some_and(|c| c.contains("Portico"));
-    if !ours {
+    if !is_ours(record) {
         return Ok(());
     }
 
@@ -402,5 +432,20 @@ mod tests {
             "errors": [{ "code": 1004, "message": "DNS name is invalid" }]
         });
         assert_eq!(error_text(&json), "DNS name is invalid");
+    }
+
+    #[test]
+    fn a_record_portico_did_not_create_is_never_treated_as_ours() {
+        // The comment is the only marker separating a record we made from a
+        // live one that was already there. Overwriting the latter would point
+        // a production hostname at a laptop, and — because the write stamps
+        // it as ours — clearing the hostname later would then delete it.
+        let mine = serde_json::json!({ "id": "r1", "comment": "Managed by Portico" });
+        let theirs = serde_json::json!({ "id": "r2", "comment": "prod www" });
+        let bare = serde_json::json!({ "id": "r3" });
+
+        assert!(is_ours(&mine));
+        assert!(!is_ours(&theirs), "someone else's record must not be adopted");
+        assert!(!is_ours(&bare), "a record with no comment is not ours");
     }
 }

@@ -1,7 +1,6 @@
 /* ==========================================================================
    Living Docs — shared behaviour + zero-dependency SVG charting
    No CDN, no build step. Works over file:// and http://.
-   No CDN, no build step. Works over file:// and http://.
    ========================================================================== */
 (function () {
   'use strict';
@@ -326,8 +325,48 @@
     });
   }
 
+  /* ---------------- Screenshot tilt ---------------- */
+  /* Rotates the frame toward the pointer. Reads are batched into one rAF so a
+     fast sweep cannot queue a layout per mousemove event. */
+  function initTilt() {
+    var fine = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!fine || still) return;
+
+    document.querySelectorAll('figure.shot').forEach(function (fig) {
+      var frame = fig.querySelector('.shot-frame');
+      if (!frame) return;
+      var raf = 0, ry = 0, rx = 0, mx = 50, my = 0;
+
+      function paint() {
+        raf = 0;
+        frame.style.transform =
+          'rotateX(' + rx.toFixed(2) + 'deg) rotateY(' + ry.toFixed(2) + 'deg) scale(1)';
+        frame.style.setProperty('--mx', mx.toFixed(1) + '%');
+        frame.style.setProperty('--my', my.toFixed(1) + '%');
+      }
+
+      fig.addEventListener('pointermove', function (e) {
+        var r = frame.getBoundingClientRect();
+        var px = (e.clientX - r.left) / r.width;          /* 0 .. 1 */
+        var py = (e.clientY - r.top) / r.height;
+        mx = px * 100; my = py * 100;
+        ry = (px - 0.5) * 20;      /* left/right swing */
+        rx = (0.5 - py) * 12;      /* toward/away       */
+        fig.classList.add('tracking');
+        if (!raf) raf = requestAnimationFrame(paint);
+      });
+
+      fig.addEventListener('pointerleave', function () {
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
+        fig.classList.remove('tracking');
+        frame.style.transform = '';   /* back to flat, per the CSS default */
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
-    buildTOC(); initTabs();
+    buildTOC(); initTabs(); initTilt();
     if (window.DKInit) window.DKInit();
   });
 })();

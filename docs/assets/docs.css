@@ -206,6 +206,62 @@ figure { margin: 0 0 26px; background: var(--surface); border: 1px solid var(--b
 figure > svg, figure > .fig-body > svg { display: block; width: 100%; height: auto; }
 figcaption { margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--border); font-size: 12.6px; color: var(--muted); line-height: 1.55; }
 figcaption b { color: var(--ink-2); font-weight: 600; }
+
+/* Product screenshots.
+   The PNG is a clean opaque rectangle — the desktop that bled into the window's
+   rounded corners is repainted out — so the radius and shadow live here.
+
+   The frame is flat at rest and tilts toward the pointer on hover. The glare
+   lives inside the transformed element: an overlay on the figure would stay
+   flat while the image turned, which is what gives a fake 3D away. */
+figure.shot {
+  background: none; border: 0; box-shadow: none; padding: 0;
+  perspective: 1500px; perspective-origin: 50% 40%;
+}
+.shot-frame {
+  position: relative;
+  border-radius: 14px;
+  transform-style: preserve-3d;
+  /* Flat and square at rest — the tilt is a response to the pointer, not the
+     default state, so the shot still reads as a plain screenshot on arrival. */
+  transform: none;
+  transition: transform .55s cubic-bezier(.22,.61,.36,1),
+              box-shadow .55s cubic-bezier(.22,.61,.36,1);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .06),
+              0 8px 20px rgba(15, 23, 42, .10),
+              0 28px 56px rgba(15, 23, 42, .12);
+  will-change: transform;
+}
+.shot-frame img { display: block; width: 100%; height: auto; border-radius: inherit; }
+
+/* Pointer highlight. Positioned from --mx/--my, which the script updates. */
+.shot-frame::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit; pointer-events: none;
+  background: radial-gradient(38% 55% at var(--mx, 50%) var(--my, 0%),
+              rgba(255,255,255,.55), rgba(255,255,255,0) 70%);
+  opacity: 0; transition: opacity .4s ease;
+}
+figure.shot.tracking .shot-frame {
+  transition-duration: .12s;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .07),
+              18px 28px 44px rgba(15, 23, 42, .14),
+              48px 74px 110px rgba(15, 23, 42, .16);
+}
+figure.shot.tracking .shot-frame::after { opacity: 1; }
+
+/* A tilted screenshot is decoration; anyone who has asked for less motion gets
+   the image flat and still. */
+@media (prefers-reduced-motion: reduce) {
+  .shot-frame, figure.shot.tracking .shot-frame {
+    transform: none; transition: none;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .06),
+                0 8px 20px rgba(15, 23, 42, .10),
+                0 28px 56px rgba(15, 23, 42, .12);
+  }
+  .shot-frame::after { display: none; }
+}
+figure.shot figcaption { border-top: 0; padding-top: 0; margin-top: 22px; }
 .fig-t { font-size: 13px; font-weight: 640; color: var(--ink); margin-bottom: 14px; letter-spacing: -.01em; }
 
 /* ---------- Details / accordions ---------- */

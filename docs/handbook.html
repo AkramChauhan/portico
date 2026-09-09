@@ -6,7 +6,7 @@
 <title>Portico — Engineering handbook</title>
 <meta name="doc:status"   content="Current">
 <meta name="doc:reviewed" content="2026-09-09">
-<meta name="doc:sources"  content="core/src/caddy.rs, core/src/setup.rs, core/src/tunnel.rs, core/src/target.rs, core/src/runner.rs, core/src/lib.rs, hostsd/src/main.rs">
+<meta name="doc:sources"  content="core/src/ngrok.rs, core/src/caddy.rs, core/src/setup.rs, core/src/tunnel.rs, core/src/target.rs, core/src/runner.rs, core/src/lib.rs, core/src/cloudflare.rs, core/src/secrets.rs, core/src/lan.rs, hostsd/src/main.rs">
 <link rel="stylesheet" href="assets/docs.css?v=0.3">
 <style>
   .diagram { width:100%; height:auto; display:block; }
@@ -190,7 +190,7 @@
       <thead><tr><th>Provider</th><th>Account</th><th>Stable hostname</th><th>Notes</th></tr></thead>
       <tbody>
         <tr><td><b>cloudflared quick</b> — default</td><td><span class="badge green dot">None</span></td><td>No — new random name each run</td><td>Verified anonymous: no config, no login, works first try</td></tr>
-        <tr><td>cloudflared named</td><td>Cloudflare + your domain</td><td>Yes</td><td>Not implemented yet</td></tr>
+        <tr><td>cloudflared named</td><td>Cloudflare API token + your domain</td><td>Yes</td><td>Per site. Portico creates the tunnel, writes the CNAME to <code>&lt;id&gt;.cfargotunnel.com</code>, and runs it against the same loopback twin</td></tr>
         <tr><td>ngrok free</td><td><span class="badge amber dot">Required</span></td><td>No</td><td>Without an authtoken the agent refuses to start (<code>ERR_NGROK_4018</code>)</td></tr>
         <tr><td>ngrok paid</td><td><span class="badge amber dot">Required</span></td><td>Yes, custom domain</td><td>Plan is detectable from the assigned hostname: the free tier is always <code>*.ngrok-free.app</code></td></tr>
       </tbody>
@@ -199,6 +199,92 @@
     <p>cloudflared stays the default precisely because it needs no account. Making ngrok the
     default would put a sign-up wall in front of the first thing a new user tries, which is
     the opposite of the zero-prerequisite install.</p>
+
+    <p>The fixed hostname is a property of the <em>site</em>, not of the app. It was global
+    once, which was a bug rather than a simplification: two sites publishing at the same time
+    both claimed the one hostname, and the second quietly lost. A config written before the
+    move carries its old value onto the first site that has none, and the global is then
+    cleared so it cannot be handed out twice.</p>
+
+    <p>ngrok is entered the same way and stored the same way, but reaches the agent by a
+    different route: a config file of our own, selected with <code>--config</code>. Not
+    <code>--authtoken</code>, which would put the secret in <code>argv</code>; and not
+    <code>ngrok config add-authtoken</code>, which does the same on its way to rewriting the
+    user&rsquo;s own file. When Portico holds no token it passes no <code>--config</code> at
+    all, so a token the user added with the ngrok CLI keeps working untouched.</p>
+
+    <p><b>The route was chosen the hard way.</b> The obvious answer is
+    <code>NGROK_AUTHTOKEN</code> in the environment, which keeps the secret off disk
+    entirely, and the agent does read it. But ngrok&rsquo;s default config file takes
+    precedence over that variable. On a machine that already had a valid token in
+    <code>~/Library/Application Support/ngrok/ngrok.yml</code>, a deliberately invalid token
+    was accepted: the probe connected on the <em>old</em> token, reported success, and stored
+    the bad one. <code>--config</code> replaces the default rather than merging with it, so
+    the token the user typed is the one that actually runs &mdash; which is what makes the
+    check below mean anything.</p>
+
+    <p>ngrok has no endpoint that answers &ldquo;is this token valid?&rdquo;, so connecting
+    is the test: saving one opens a throwaway tunnel, and both the keychain entry and the
+    config file are removed again if that fails. The hostname it gets back also reveals the
+    plan, since the free tier is always on <code>ngrok-free.app</code> &mdash; which is why
+    there is no separate &ldquo;check my plan&rdquo; action. Entering the token already
+    answers the question.</p>
+
+    <p>Neither token leaves the machine. Both live in the login keychain, and Portico has no
+    account and no server of its own to send them to; the only thing that ever sees one is
+    Cloudflare&rsquo;s or ngrok&rsquo;s own API. The interface says so next to the fields,
+    because &ldquo;stored in your keychain&rdquo; answers where it is kept without answering
+    the question people actually have, which is whether it was uploaded.</p>
+
+    <p>The file is schema 3, which nests the token under <code>agent</code>. A bare
+    top-level <code>authtoken</code> is schema 2, and a v3 agent rejects the whole file with
+    <code>field authtoken not found in type config.v3yamlConfig</code> &mdash; which reads
+    like a Portico bug rather than a config one.</p>
+
+    <p><b>One trap worth naming.</b> ngrok quotes a rejected authtoken back inside its own
+    error text &mdash; &ldquo;Your authtoken: &lt;value&gt;&rdquo;. That output is written to
+    <code>tunnel-&lt;site&gt;.log</code> and the last error line is shown in the app, so
+    without care a single mistyped token would sit in plaintext in a file that outlives the
+    mistake. Every line the agent prints is scrubbed of the token before it is written down
+    or surfaced.</p>
+
+    <p>The API token lives in the login keychain, not in <code>config.json</code>. That file
+    is written <code>0644</code> — protected only by the <code>0700</code> directory around
+    it — and is read wholesale on every <code>Config::load()</code>. A token that can edit
+    DNS on a real account does not belong there. It never appears in a command line either:
+    both <code>security</code> and <code>curl</code> receive it on stdin, because everything
+    in <code>argv</code> is visible to any local process through <code>ps</code>.</p>
+
+<h2 id="lan">5b · Reaching a site from another device</h2>
+    <p>Three tiers, and the difference between them is the whole point of being explicit
+    about which one a site is on.</p>
+
+    <div class="t-scroll"><table>
+      <thead><tr><th>Tier</th><th>Who can reach it</th><th>Address</th><th>TLS</th></tr></thead>
+      <tbody>
+        <tr><td>Local</td><td>This Mac only</td><td><code>https://shop.test</code></td><td>Portico&rsquo;s own CA, trusted here</td></tr>
+        <tr><td>Local network</td><td>Anyone on the same network</td><td><code>http://192.168.1.5:8801</code></td><td><span class="badge amber dot">None</span> &mdash; plain HTTP</td></tr>
+        <tr><td>Public</td><td>The entire internet</td><td><code>https://hooks.example.com</code></td><td>Publicly trusted, via Cloudflare</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>The obstacle to LAN sharing is not the listening socket &mdash; it is that the other
+    device cannot resolve the name. dnsmasq answers on <code>127.0.0.1</code> and returns
+    <code>127.0.0.1</code>; a phone can neither reach it nor use its answer. Publishing over
+    mDNS or repointing each device&rsquo;s DNS both work, and both are a setup step per
+    device.</p>
+
+    <p>So a shared site gets its own port on every interface instead, and the address handed
+    to the user is a bare IP. Uglier than a hostname, and it works on every device with
+    nothing to configure &mdash; the better trade for &ldquo;open this on my phone for two
+    minutes&rdquo;. Plain HTTP for the same reason: the certificate is signed by an authority
+    that exists only in this Mac&rsquo;s trust store, so every other device would warn. A
+    padlock that has to be explained is worse than no padlock.</p>
+
+    <p>Unlike a public tunnel, this survives a restart. A quick tunnel is cleared at launch
+    because its hostname is random and the user has never seen it; a LAN port is stable and
+    was chosen deliberately. The cost is that the network at a café is not the network at
+    home, which is why the interface says so next to the switch rather than in a tooltip.</p>
 
 <h2 id="changes">6 · What is installed</h2>
     <div class="t-scroll"><table>

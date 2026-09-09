@@ -10,7 +10,8 @@ a browser-trusted certificate, and optionally publish it so webhooks can reach i
 ```
 https://app.io                 → localhost:8000      (this Mac)
 https://app.io                 → ~/Projects/my-app   (no port at all)
-https://xyz.trycloudflare.com  → the same site       (the whole internet)
+http://192.168.1.5:8801        → the same site       (everyone on your Wi-Fi)
+https://hooks.example.com      → the same site       (the whole internet)
 ```
 
 Nothing to install first. No Homebrew, no manual config, no editing `/etc/hosts` by hand.
@@ -70,12 +71,40 @@ Point the target at a project directory and the type is worked out for you:
 
 | Provider | Account | Stable hostname |
 |---|---|---|
-| **cloudflared** (default) | none | no — new random name each run |
+| **cloudflared quick** (default) | none | no — new random name each run |
+| cloudflared named | Cloudflare API token + your domain | yes, one per site |
 | ngrok | required | with a paid plan |
 
 A Cloudflare quick tunnel is anonymous: no login, no domain. ngrok needs an account, which
 is why it is opt-in from Settings rather than the default — it would put a sign-up wall in
 front of the first thing a new user tries.
+
+Connect a Cloudflare API token and each site can claim a **fixed** hostname on a domain you
+own. That is the difference between a URL you can paste into Stripe once and a URL you have
+to re-paste every morning.
+
+Both providers take their token in Settings, and both keep it in your login keychain — on
+your machine only. Portico has no account and no server of its own, so a token is never
+uploaded anywhere; the only thing that sees it is Cloudflare's or ngrok's own API.
+Neither secret passes through a command line: Cloudflare's reaches curl on stdin, ngrok's is
+written to a private config file that the agent is pointed at with `--config`. An ngrok
+authtoken you added yourself with `ngrok config add-authtoken` keeps working — Portico only
+overrides it when you have entered one of your own.
+
+## Local network
+
+A third tier sits between "this Mac" and "the internet": share a site with other devices on
+the same network, and Portico opens one plain-HTTP port for it on every interface.
+
+```sh
+portico lan mysite.test on     # → http://192.168.1.5:8801
+```
+
+Addressed by IP on purpose. Another device cannot resolve `mysite.test` and does not trust
+this Mac's certificate authority, so a hostname would need DNS setup per device and HTTPS
+would warn on every one of them. An IP and a port work on everything with nothing to
+configure — and it works even when your dev server only listens on `127.0.0.1`, because
+Caddy is the one doing the proxying.
 
 ## Compared with the alternatives
 
@@ -106,6 +135,11 @@ portico ls / rm <domain>
 portico run <domain> on|off        # start/stop a supervised dev server
 portico logs / requests / health <domain>
 portico tunnel <domain>            # public URL, until Ctrl-C
+portico public <domain> <host|off> # fixed public hostname for that site
+portico lan <domain> on|off        # share with other devices on your network
+portico cloudflare connect         # store an API token (read from stdin)
+portico cloudflare status          # what that token can reach
+portico ngrok connect              # store an ngrok authtoken (read from stdin)
 
 portico uninstall                  # undo every system change
 ```
@@ -139,7 +173,8 @@ rather than filing publicly.
 ## Development
 
 ```
-core/     engine — config, Caddyfile generation, DNS, hosts, processes, tunnels
+core/     engine — config, Caddyfile generation, DNS, hosts, processes, tunnels,
+          Cloudflare API, keychain secrets, LAN sharing
 cli/      portico, a thin wrapper over core
 hostsd/   the root /etc/hosts helper — small on purpose
 app/      Tauri desktop app (ui/ is plain HTML/CSS/JS, no build step)
@@ -166,8 +201,8 @@ not just that it works. `CLAUDE.md` lists the conventions that exist for a reaso
 one is there because its absence caused a bug.
 
 Open items if you are looking for something to pick up: translating the Rust-side
-strings, named Cloudflare tunnels for stable hostnames, and getting `cargo fmt --check`
-and `cargo clippy -D warnings` clean enough to add to CI.
+strings, publishing LAN-shared sites over mDNS so they get a name rather than an IP, and
+getting `cargo fmt --check` and `cargo clippy -D warnings` clean enough to add to CI.
 
 ## License
 

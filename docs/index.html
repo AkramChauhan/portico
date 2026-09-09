@@ -7,7 +7,7 @@
 <meta name="doc:status"   content="Current">
 <meta name="doc:reviewed" content="2026-09-09">
 <meta name="doc:sources"  content="">
-<link rel="stylesheet" href="assets/docs.css?v=0.2">
+<link rel="stylesheet" href="assets/docs.css?v=0.3">
 <style>
   .hub { max-width:900px; margin:0 auto; padding:0 40px 120px; }
   .hero { padding:64px 0 40px; }
@@ -25,7 +25,7 @@
 
 <header class="d-top">
   <a class="d-logo" href="index.html">
-    <img src="assets/logo.png?v=0.2" alt="" width="22" height="22" style="display:block">
+    <img src="assets/logo.png?v=0.3" alt="" width="22" height="22" style="display:block">
     Portico
   </a>
   <span class="sep">/</span><span class="doc-name">Documentation</span>
@@ -39,6 +39,20 @@
     when a webhook needs to reach it. The handbook below covers how that works, what it
     changes on the machine, and the platform traps behind the odd-looking code.</p>
   </div>
+
+  <figure class="shot">
+    <div class="shot-frame">
+    <img src="assets/screenshot-sites.png?v=0.3" width="1800" height="1116"
+         alt="Portico's Sites view. A sidebar lists Sites, Settings, Logs and Diagnostics.
+              Two rows show https://wink.io pointing at 127.0.0.1:8000 and https://naami.io
+              at 127.0.0.1:3001, each badged HTTPS and hosts, each with a Public toggle.
+              The status bar reads: all systems ready, System mode, 2 sites.">
+    </div>
+    <figcaption>Each site is one row — the HTTPS address, what it points at, and a toggle
+    that publishes it to the internet. <b>HTTPS</b> means a browser-trusted certificate is
+    installed; <b>hosts</b> means the name is pinned in <code>/etc/hosts</code> rather than
+    resolved by wildcard DNS.</figcaption>
+  </figure>
 
   <h2 id="docs" style="border:none;padding-top:0">Documents</h2>
   <div id="docList"></div>
@@ -85,8 +99,8 @@
   </table></div>
 </div>
 
-<script src="data/data.js?v=0.2"></script>
-<script src="assets/docs.js?v=0.2"></script>
+<script src="data/data.js?v=0.3"></script>
+<script src="assets/docs.js?v=0.3"></script>
 <script>
 window.DKInit = function () {
   var D = window.DOCS, S = { Draft:'amber', Current:'green', Superseded:'grey' };

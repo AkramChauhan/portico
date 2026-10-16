@@ -20,7 +20,11 @@ Keep it consolidated: one handbook, important items only. Resist adding document
 - **Never name a local variable `t`** in the frontend — that is the translation function,
   and shadowing it in a render path blanked the site list once already.
 - **Values reaching the Caddyfile are quoted; values reaching the offline page are HTML
-  escaped.** Both are injection sinks, one into a root-loaded config.
+  escaped.** Both are injection sinks, one into the config a long-running service loads.
+- **Nothing Portico runs binds port 80 or 443, and pf never matches `127.0.0.1`.** A root
+  Caddy on `0.0.0.0:443` blocked Docker; binding it to loopback does not help, because macOS
+  refuses another user's wildcard bind on a port root holds anywhere. Domains resolve to
+  `127.77.0.1`, which pf forwards to Caddy's high ports.
 - **launchd**: retire a job with a retry loop before bootstrapping it, and set
   `ThrottleInterval` on `WatchPaths` jobs. Both defaults will bite silently.
 - **i18n**: every language carries the same key set. Generate new blocks from the English

@@ -1,12 +1,13 @@
-use crate::config::{Config, Mode, Site, PLAIN_PORT};
+use crate::config::{Config, Site, PLAIN_PORT};
 use crate::paths;
 use crate::target::Target;
 use std::process::Command;
 
 /// Quote a value for the Caddyfile.
 ///
-/// Paths and upstreams reach a config file that a **root** daemon loads, and
-/// they are not trustworthy: a directory may legitimately contain `}` or a
+/// Paths and upstreams reach a config file that a long-running service loads —
+/// one that can open a listener on every interface and serve any file the user
+/// can read — and they are not trustworthy: a directory may legitimately contain `}` or a
 /// quote, and config.json is writable by anything running as the user. Without
 /// this, such a value terminates the site block and everything after it is
 /// parsed as further top-level directives.
@@ -61,17 +62,24 @@ pub fn render(cfg: &Config) -> String {
     ));
     out.push_str("\t\t\troll_size 10MiB\n");
     out.push_str("\t\t\troll_keep 3\n");
-    // Caddy creates log files 0600 and runs as root in System mode; without
-    // this the unprivileged app could never read its own access log.
+    // Caddy creates log files 0600. When it ran as root in System mode, the
+    // app could not read its own access log without this.
     out.push_str("\t\t\tmode 0644\n");
     out.push_str("\t\t}\n");
     out.push_str("\t\tformat json\n");
     out.push_str("\t}\n");
-    if cfg.mode.is_standalone() {
-        // Without root there is no port 80, so Caddy must not try to bind it
-        // for its automatic HTTP->HTTPS redirects.
-        out.push_str(&format!("\thttp_port {}\n", cfg.http_port()));
-        out.push_str(&format!("\thttps_port {}\n", cfg.https_port()));
+    // Caddy never binds 80 or 443 in either mode. Standalone has no root to do
+    // it with; System has pf carry those ports across to these.
+    out.push_str(&format!("\thttp_port {}\n", cfg.listen_http_port()));
+    out.push_str(&format!("\thttps_port {}\n", cfg.listen_https_port()));
+    // Portico trusts the CA itself, in the user trust domain, at setup. Left to
+    // Caddy, an unprivileged process would try the system trust store instead.
+    out.push_str("\tskip_install_trust\n");
+    if !cfg.mode.is_standalone() {
+        // Caddy's own redirect would send the browser to https://site:18443,
+        // the port pf forwards to rather than the one it forwards from. The
+        // redirects are written out per site below instead.
+        out.push_str("\tauto_https disable_redirects\n");
     }
     out.push_str("}\n\n");
 
@@ -80,19 +88,29 @@ pub fn render(cfg: &Config) -> String {
     if !cfg.sites.is_empty() {
         out.push_str(&format!("http://:{PLAIN_PORT} {{\n"));
         out.push_str("\tbind 127.0.0.1\n");
-        out.push_str("\trespond \"Portico: no site configured for {host}\" 404\n");
+        out.push_str(&format!("\trespond \"{UNMATCHED}{{host}}\" 404\n"));
+        out.push_str("}\n\n");
+    }
+
+    // The same catch-all on the forwarded HTTP port, present even with no
+    // sites: it is what the doctor probes to prove pf is forwarding to us,
+    // since a bare connection could just as well be answered by Docker.
+    if !cfg.mode.is_standalone() {
+        out.push_str(&format!("http://:{} {{\n", cfg.listen_http_port()));
+        out.push_str(&bind_line(1));
+        out.push_str(&format!("\trespond \"{UNMATCHED}{{host}}\" 404\n"));
         out.push_str("}\n\n");
     }
 
     for site in &cfg.sites {
         // The vhost the browser talks to.
         let (scheme, port) = if site.ssl {
-            ("https", cfg.https_port())
+            ("https", cfg.listen_https_port())
         } else {
-            ("http", cfg.http_port())
+            ("http", cfg.listen_http_port())
         };
         out.push_str(&format!("{scheme}://{}:{port} {{\n", site.domain));
-        out.push_str(&bind_line(cfg, 1));
+        out.push_str(&bind_line(1));
         if site.ssl {
             out.push_str("\ttls internal\n");
         }
@@ -100,6 +118,18 @@ pub fn render(cfg: &Config) -> String {
         out.push_str(&handler_block(site, 1));
         out.push_str(&error_block(site, 1));
         out.push_str("}\n\n");
+
+        // Plain HTTP to an HTTPS site, redirected to the port the browser
+        // should use. Standalone keeps Caddy's automatic redirect, which is
+        // already right there because nothing is forwarded.
+        if site.ssl && !cfg.mode.is_standalone() {
+            let (https, _) = cfg.browser_ports(&site.domain);
+            let port = if https == 443 { String::new() } else { format!(":{https}") };
+            out.push_str(&format!("http://{}:{} {{\n", site.domain, cfg.listen_http_port()));
+            out.push_str(&bind_line(1));
+            out.push_str(&format!("\tredir https://{{host}}{port}{{uri}} 308\n"));
+            out.push_str("}\n\n");
+        }
 
         // LAN listener: the same site on its own port, on every interface.
         //
@@ -157,12 +187,16 @@ fn error_block(site: &Site, depth: usize) -> String {
     s
 }
 
-/// Standalone mode binds only loopback; system mode serves the real ports.
-fn bind_line(cfg: &Config, depth: usize) -> String {
-    match cfg.mode {
-        Mode::Standalone => format!("{}bind 127.0.0.1\n", "\t".repeat(depth)),
-        Mode::System => String::new(),
-    }
+/// Body prefix of the catch-all's 404. The doctor matches on it.
+pub const UNMATCHED: &str = "Portico: no site configured for ";
+
+/// Every vhost binds loopback only, in both modes.
+///
+/// System mode used to emit no bind at all, which put every site on
+/// 0.0.0.0:443 — reachable from the network, and holding a port Docker needs.
+/// Both stacks, because pf forwards the IPv6 address to `::1`.
+fn bind_line(depth: usize) -> String {
+    format!("{}bind 127.0.0.1 [::1]\n", "\t".repeat(depth))
 }
 
 fn handler_block(site: &Site, depth: usize) -> String {
@@ -323,7 +357,7 @@ mod tests {
     use super::*;
     use crate::config::Site;
 
-    use crate::config::Mode;
+    use crate::config::{Mode, SYSTEM_HTTPS_BACKEND, SYSTEM_HTTP_BACKEND};
 
     fn site(target: Target, ssl: bool, spa: bool) -> Site {
         Site {
@@ -358,8 +392,7 @@ mod tests {
         cfg.mode = Mode::System;
         cfg.sites.push(site(Target::Proxy { upstream: "127.0.0.1:8000".into() }, true, false));
         let out = render(&cfg);
-        assert!(out.contains("https://mysite.test:443 {"));
-        assert!(!out.contains("http_port"));
+        assert!(out.contains(&format!("https://mysite.test:{SYSTEM_HTTPS_BACKEND} {{")));
         assert!(out.contains("tls internal"));
         assert!(out.contains(r#"reverse_proxy "127.0.0.1:8000""#));
     }
@@ -386,7 +419,63 @@ mod tests {
 
     #[test]
     fn no_sites_means_no_catch_all() {
-        assert!(!render(&Config::default()).contains("no site configured"));
+        let mut cfg = Config::default();
+        cfg.mode = Mode::Standalone;
+        assert!(!render(&cfg).contains("no site configured"));
+    }
+
+    #[test]
+    fn system_mode_never_binds_80_or_443_or_every_interface() {
+        // Docker and anything else must be able to take 0.0.0.0:443. A site
+        // on the LAN listener is the one deliberate exception to loopback.
+        let mut cfg = Config::default();
+        cfg.mode = Mode::System;
+        cfg.sites.push(site(Target::Proxy { upstream: "127.0.0.1:8000".into() }, true, false));
+        cfg.sites.push({
+            let mut s = site(Target::Dir { path: "/tmp".into() }, false, false);
+            s.id = "plain-test".into();
+            s.domain = "plain.test".into();
+            s
+        });
+        let out = render(&cfg);
+        for line in out.lines().filter(|l| l.ends_with('{') && l.contains("://")) {
+            assert!(!line.contains(":443 ") && !line.contains(":80 "), "binds a real port: {line}");
+        }
+        assert!(!out.contains("0.0.0.0"), "nothing may bind every interface:\n{out}");
+        let blocks = out.lines().filter(|l| l.ends_with('{') && l.contains("://")).count();
+        let binds = out.lines().filter(|l| l.trim().starts_with("bind 127.0.0.1")).count();
+        assert_eq!(blocks, binds, "every listener must bind loopback explicitly:\n{out}");
+        assert!(out.contains(&format!("http_port {SYSTEM_HTTP_BACKEND}")));
+        assert!(out.contains(&format!("https_port {SYSTEM_HTTPS_BACKEND}")));
+    }
+
+    #[test]
+    fn system_mode_redirects_to_the_port_the_browser_uses() {
+        // Caddy's automatic redirect would name the backend port, which only
+        // works by accident and breaks the moment anything else holds it.
+        let mut cfg = Config::default();
+        cfg.mode = Mode::System;
+        cfg.sites.push(site(Target::Proxy { upstream: "127.0.0.1:8000".into() }, true, false));
+        let mut local = site(Target::Proxy { upstream: "127.0.0.1:8001".into() }, true, false);
+        local.id = "app-localhost".into();
+        local.domain = "app.localhost".into();
+        cfg.sites.push(local);
+        let out = render(&cfg);
+        assert!(out.contains("auto_https disable_redirects"));
+        assert!(out.contains(&format!("http://mysite.test:{SYSTEM_HTTP_BACKEND} {{")));
+        assert!(out.contains("redir https://{host}{uri} 308"), "forwarded site keeps a port-free URL:\n{out}");
+        // Browsers pin *.localhost to 127.0.0.1, which pf does not forward.
+        assert!(out.contains(&format!("redir https://{{host}}:{SYSTEM_HTTPS_BACKEND}{{uri}} 308")), "{out}");
+    }
+
+    #[test]
+    fn system_mode_always_has_a_probe_for_the_forwarding() {
+        // Present with no sites, so a fresh install can be verified too.
+        let mut cfg = Config::default();
+        cfg.mode = Mode::System;
+        let out = render(&cfg);
+        assert!(out.contains(&format!("http://:{SYSTEM_HTTP_BACKEND} {{")));
+        assert!(out.contains(UNMATCHED));
     }
 
     #[test]
@@ -395,8 +484,9 @@ mod tests {
         cfg.mode = Mode::System;
         cfg.sites.push(site(Target::Proxy { upstream: "127.0.0.1:1".into() }, false, false));
         let out = render(&cfg);
-        assert!(out.contains("http://mysite.test:80 {"));
+        assert!(out.contains(&format!("http://mysite.test:{SYSTEM_HTTP_BACKEND} {{")));
         assert!(!out.contains("tls internal"));
+        assert!(!out.contains("redir "), "a plain site has nothing to redirect to");
     }
 
     #[test]
@@ -443,15 +533,16 @@ mod tests {
 
 #[cfg(test)]
 mod security_tests {
-    //! These assert on *untrusted* strings reaching two privileged sinks: the
-    //! Caddyfile, which a root daemon loads, and the offline page, which is
+    //! These assert on *untrusted* strings reaching two sensitive sinks: the
+    //! Caddyfile, which a long-running service loads, and the offline page, which is
     //! served on the user's own HTTPS origin.
     use super::*;
     use crate::config::{Config, Mode, Site};
     use crate::target::Target;
 
-    /// Count blocks opened at column zero: the global options, the catch-all,
-    /// and one pair per site. Anything more means a value escaped its context.
+    /// Count blocks opened at column zero: the global options, the two
+    /// catch-alls, and for one System-mode HTTPS site its vhost, redirect and
+    /// loopback twin. Anything more means a value escaped its context.
     fn top_level_blocks(config: &str) -> usize {
         config
             .lines()
@@ -493,7 +584,7 @@ mod security_tests {
         assert!(out.contains("root * \""), "the path was not quoted:\n{out}");
         // Structural check: exactly the blocks we intended, and no more.
         // (The payload text survives inside the quoted path, which is inert.)
-        assert_eq!(top_level_blocks(&out), 4, "extra blocks appeared:\n{out}");
+        assert_eq!(top_level_blocks(&out), 6, "extra blocks appeared:\n{out}");
     }
 
     #[test]
@@ -504,7 +595,7 @@ mod security_tests {
         cfg.sites.push(site_with(Target::Php { root: evil.into() }));
         let out = render(&cfg);
         assert!(!out.lines().any(|l| l.trim().starts_with("respond \"owned\"")));
-        assert_eq!(top_level_blocks(&out), 4, "extra blocks appeared:\n{out}");
+        assert_eq!(top_level_blocks(&out), 6, "extra blocks appeared:\n{out}");
     }
 
     #[test]

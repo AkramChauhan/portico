@@ -6,15 +6,18 @@ pub const END_MARK: &str = "# === Portico END ===";
 /// The block we own inside /etc/hosts. Rewritten wholesale each time.
 /// With nothing to map we emit nothing at all, so uninstalling the last
 /// custom-TLD site leaves no trace behind.
-pub fn render_block(domains: &[String]) -> String {
+///
+/// `loopback` is the address pair from `Config::loopback`, which depends on
+/// the mode: System mode maps to the forwarded address, not 127.0.0.1.
+pub fn render_block(domains: &[String], loopback: (&str, &str)) -> String {
     if domains.is_empty() {
         return String::new();
     }
     let mut s = String::from(BEGIN_MARK);
     s.push('\n');
     for d in domains {
-        s.push_str(&format!("127.0.0.1\t{d}\n"));
-        s.push_str(&format!("::1\t\t{d}\n"));
+        s.push_str(&format!("{}\t{d}\n", loopback.0));
+        s.push_str(&format!("{}\t\t{d}\n", loopback.1));
     }
     s.push_str(END_MARK);
     s.push('\n');
@@ -46,8 +49,8 @@ pub fn current_block() -> String {
 /// Comparing the whole block, rather than only looking for absent domains,
 /// is what makes removals take effect — otherwise deleting a custom-TLD site
 /// would leave its mapping behind and keep shadowing the real domain.
-pub fn needs_sync(domains: &[String]) -> bool {
-    current_block() != render_block(domains)
+pub fn needs_sync(domains: &[String], loopback: (&str, &str)) -> bool {
+    current_block() != render_block(domains, loopback)
 }
 
 /// Ask the root helper to make /etc/hosts match this list.
@@ -68,15 +71,15 @@ pub fn watcher_installed() -> bool {
 /// Wait for the helper to catch up after a request.
 /// launchd still paces job starts, so allow generously more time than the
 /// helper itself needs.
-pub fn wait_for_sync(domains: &[String], millis: u64) -> bool {
+pub fn wait_for_sync(domains: &[String], loopback: (&str, &str), millis: u64) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(millis);
     while std::time::Instant::now() < deadline {
-        if !needs_sync(domains) {
+        if !needs_sync(domains, loopback) {
             return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(150));
     }
-    !needs_sync(domains)
+    !needs_sync(domains, loopback)
 }
 
 /// Which of these domains are missing from /etc/hosts right now.
@@ -103,9 +106,12 @@ pub fn missing(domains: &[String]) -> Vec<String> {
 mod tests {
     use super::*;
 
+    const STANDALONE: (&str, &str) = ("127.0.0.1", "::1");
+    const SYSTEM: (&str, &str) = (crate::config::LOOPBACK_V4, crate::config::LOOPBACK_V6);
+
     #[test]
     fn block_contains_both_stacks() {
-        let b = render_block(&["mywebsite.io".to_string()]);
+        let b = render_block(&["mywebsite.io".to_string()], STANDALONE);
         assert!(b.contains("127.0.0.1\tmywebsite.io"));
         assert!(b.contains("::1\t\tmywebsite.io"));
         assert!(b.starts_with(BEGIN_MARK));
@@ -114,16 +120,34 @@ mod tests {
 
     #[test]
     fn empty_list_renders_nothing() {
-        assert_eq!(render_block(&[]), "");
+        assert_eq!(render_block(&[], SYSTEM), "");
+    }
+
+    #[test]
+    fn system_mode_maps_to_the_forwarded_address() {
+        let b = render_block(&["app.io".to_string()], SYSTEM);
+        assert!(b.contains(&format!("{}\tapp.io", crate::config::LOOPBACK_V4)));
+        assert!(b.contains(&format!("{}\t\tapp.io", crate::config::LOOPBACK_V6)));
+        assert!(!b.contains("127.0.0.1"), "127.0.0.1:443 is not ours to answer on:\n{b}");
+    }
+
+    #[test]
+    fn the_root_helper_writes_the_same_addresses_as_core() {
+        // hostsd is a separate crate with no dependency on core, so it spells
+        // the addresses out itself. If the two ever differ, the doctor reports
+        // the hosts block stale forever and every edit waits 12s then fails.
+        let helper = include_str!("../../hostsd/src/main.rs");
+        assert!(helper.contains(&format!("\"{}\"", crate::config::LOOPBACK_V4)));
+        assert!(helper.contains(&format!("\"{}\"", crate::config::LOOPBACK_V6)));
     }
 
     #[test]
     fn sync_is_needed_when_the_block_would_change() {
         // A machine with no managed block yet needs no sync for an empty list...
         let none: Vec<String> = vec![];
-        assert_eq!(needs_sync(&none), !current_block().is_empty());
+        assert_eq!(needs_sync(&none, SYSTEM), !current_block().is_empty());
         // ...but always needs one to add a domain that is not there.
-        assert!(needs_sync(&["definitely-not-mapped.example".to_string()]));
+        assert!(needs_sync(&["definitely-not-mapped.example".to_string()], SYSTEM));
     }
 
     #[test]

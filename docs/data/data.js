@@ -7,14 +7,14 @@
 window.DOCS = {
 
   version: '0.1.0',
-  updated: '2026-09-09',
+  updated: '2026-10-17',
 
   /* Registry — rendered by docs/index.html */
   docs: [
     { file: 'handbook.html', title: 'Engineering handbook', status: 'Current', owner: 'akramchauhan',
-      updated: '2026-09-09',
+      updated: '2026-10-17',
       blurb: 'How a request reaches your project, what Portico changes on the machine, the risks that come with that, and the platform traps that look like arbitrary complexity until you know what they defend against.',
-      sources: ['core/src/caddy.rs', 'core/src/setup.rs', 'core/src/tunnel.rs', 'core/src/target.rs', 'core/src/runner.rs', 'core/src/lib.rs', 'core/src/cloudflare.rs', 'core/src/secrets.rs', 'core/src/lan.rs', 'hostsd/src/main.rs'] }
+      sources: ['core/src/caddy.rs', 'core/src/setup.rs', 'core/src/tunnel.rs', 'core/src/target.rs', 'core/src/runner.rs', 'core/src/lib.rs', 'core/src/cloudflare.rs', 'core/src/secrets.rs', 'core/src/lan.rs', 'core/src/config.rs', 'core/src/hosts.rs', 'core/src/paths.rs', 'hostsd/src/main.rs'] }
   ],
 
   /* Capability status. s: done | doing | todo | blocked */
@@ -58,6 +58,11 @@ window.DOCS = {
        + 'config file selected with --config. ngrok is verified by actually connecting, since '
        + 'it offers no validation endpoint — which also reveals the plan, so no separate check '
        + 'is needed. Neither token leaves the machine; Portico has no server to send them to.' },
+    { id: 'F17', s: 'done', area: 'Serving',    t: 'Ports 80 and 443 stay free for other tools',
+      d: 'Caddy runs as the user on loopback 18443/18080 in System mode. Domains resolve to 127.77.0.1, '
+       + 'and a pf rule in the com.apple/portico anchor forwards that address\u2019s 443 and 80, so URLs keep '
+       + 'no port while Docker binds 0.0.0.0:443. Verified with Docker holding *:443: localhost reached '
+       + 'Docker, the site reached Caddy over IPv4 and IPv6.' },
     { id: 'F15', s: 'done', area: 'Serving',    t: 'Local network sharing',
       d: 'One plain-HTTP port per shared site, bound to every interface, addressed by IP so no '
        + 'device needs DNS or a certificate. Off by default and stated plainly in the interface.' }
@@ -79,17 +84,13 @@ window.DOCS = {
 
     { id: 'A4', text: 'Quick-tunnel failures observed mid-session were Cloudflare rate limiting.',
       impact: 'Low', confidence: 'Unverified',
-      how: 'Create tunnels in rapid succession from one IP and look for a 429 or an explicit limit message in the captured log.' },
-
-    { id: 'A5', text: 'Tauri stages a sidecar into Contents/MacOS with the target triple stripped.',
-      impact: 'Medium', confidence: 'Unverified',
-      how: 'Run tauri build and list Portico.app/Contents/MacOS. Mitigated already: the lookup accepts both the plain and suffixed name.' }
+      how: 'Create tunnels in rapid succession from one IP and look for a 429 or an explicit limit message in the captured log.' }
   ],
 
   risks: [
-    { id: 'R01', risk: 'Caddy admin API is unauthenticated on 127.0.0.1:2019 and drives a root daemon in System mode. Any local process can reconfigure it, including to serve any file root can read.',
-      sev: 'High', area: 'Privilege', status: 'Accepted',
-      mit: 'No clean fix: Caddy offers no way to set a unix socket’s permissions, so a socket would be unreachable by the unprivileged app. Not a privilege boundary in Standalone mode, where Caddy runs as the user.' },
+    { id: 'R01', risk: 'Caddy admin API is unauthenticated on 127.0.0.1:2019. While System mode ran Caddy as root, any local process could reconfigure it to serve any file root can read.',
+      sev: 'Low', area: 'Privilege', status: 'Mitigated',
+      mit: 'Caddy runs as the user in both modes since pf took over ports 80 and 443, so the API grants nothing a process running as the user does not already have. Still unauthenticated; no longer a privilege boundary.' },
 
     { id: 'R02', risk: 'The /etc/hosts helper grants any process running as the user permanent, password-free ability to map hostnames to loopback.',
       sev: 'Medium', area: 'Privilege', status: 'Accepted',
@@ -135,24 +136,33 @@ window.DOCS = {
       sev: 'Medium', area: 'Correctness', status: 'Fixed',
       mit: 'The agent is now run with --config pointing at a file Portico writes (0600), which replaces the default instead of merging with it. The validation probe uses the same file, so it tests the token the user actually entered.' },
 
-    { id: 'R13', risk: 'In System mode Caddy binds 0.0.0.0:443, so every site is reachable from the local network by anyone who knows the hostname — with or without local network sharing switched on.',
-      sev: 'Medium', area: 'Exposure', status: 'Open',
-      mit: 'Predates the sharing feature: bind_line emits no bind directive in System mode. Standalone pins loopback and is unaffected. Confirmed with curl --resolve against the LAN address while every site had sharing off. A fix would bind the HTTPS listener to loopback and let the sharing toggle open the interface, at the cost of a second listener per site.' },
+    { id: 'R13', risk: 'In System mode Caddy bound 0.0.0.0:443, so every site was reachable from the local network by anyone who knew the hostname — with or without local network sharing switched on.',
+      sev: 'Medium', area: 'Exposure', status: 'Fixed',
+      mit: 'Every vhost binds 127.0.0.1 and ::1 in both modes; the LAN listener is the only socket on another interface. A test asserts every System-mode listener binds loopback and none binds 80 or 443.' },
 
     { id: 'R14', risk: 'Setting a fixed hostname on a name that already has a DNS record would overwrite it, pointing a live hostname at a laptop — and stamp it as Portico-managed, so clearing the hostname later deleted it outright.',
       sev: 'Medium', area: 'Correctness', status: 'Fixed',
-      mit: 'upsert_dns now refuses any record whose comment does not mark it as ours, matching the guard delete_dns already had. The apex was the likely casualty, since an empty subdomain in the interface means the domain itself.' }
+      mit: 'upsert_dns now refuses any record whose comment does not mark it as ours, matching the guard delete_dns already had. The apex was the likely casualty, since an empty subdomain in the interface means the domain itself.' },
+
+    { id: 'R15', risk: 'Forwarding depends on pf staying enabled and on /etc/pf.conf evaluating com.apple/* anchors. A customised pf.conf, or anything running pfctl -d, silently stops every System-mode site.',
+      sev: 'Low', area: 'Correctness', status: 'Mitigated',
+      mit: 'The doctor asks 127.77.0.1:80 for an unused hostname and requires Portico\u2019s own 404, so a stopped forward cannot pass as Docker answering. It is a fixable check: setup reloads the rules.' },
+
+    { id: 'R16', risk: 'Another dnsmasq config claiming the same TLD — Laravel Valet maps .test to 127.0.0.1 — gives two answers. A browser that picks 127.0.0.1 reaches whatever holds 127.0.0.1:443 rather than the site.',
+      sev: 'Low', area: 'Correctness', status: 'Open',
+      mit: 'Invisible while both answers were 127.0.0.1. The doctor now reports it without blocking; the other config is the user\u2019s to remove. Custom domains are unaffected, since /etc/hosts answers them.' }
   ],
 
   glossary: [
     { t: 'Loopback twin', d: 'A second plain-HTTP vhost for every site on 127.0.0.1:8880. Tunnels point here rather than at the HTTPS listener, so a tunnelled request lands on exactly the same handler as a local one and the tunnel never needs to trust the local CA.' },
-    { t: 'System mode', d: 'Caddy runs as a root LaunchDaemon and binds ports 80/443, giving port-free URLs. One authorisation at install. The default.' },
+    { t: 'System mode', d: 'Caddy runs as a user LaunchAgent on loopback 18443/18080; pf forwards 127.77.0.1:443 and :80 to it, giving port-free URLs without holding 443. One authorisation at install. The default.' },
+    { t: 'Loopback forwarding', d: 'Two lo0 aliases (127.77.0.1, fd70:6f72:7469:636f::1) plus pf rdr rules carrying their 443 and 80 to Caddy. Re-applied at every boot by io.portico.loopback, because neither survives a restart \u2014 verified after a reboot: the job logged success and the doctor\u2019s forwarding probe passed.' },
     { t: 'Standalone mode', d: 'Caddy runs as a user LaunchAgent on port 8443. Touches nothing outside the home folder except an /etc/hosts line for a custom domain.' },
     { t: 'Quick tunnel', d: 'An anonymous Cloudflare tunnel. No account, no domain — but a new random hostname on every restart.' },
     { t: 'Named tunnel', d: 'A Cloudflare tunnel that Portico creates on your account, with a CNAME pointing at <id>.cfargotunnel.com. The hostname is yours and survives restarts, which is what a webhook registered days ago needs.' },
     { t: 'LAN listener', d: 'One plain-HTTP port per shared site, bound to every interface. Addressed by IP because no other device can resolve a .test name or trust the local CA.' },
     { t: 'Hosts helper', d: 'portico-hostsd. A root binary launchd starts only when a specific request file changes; it rewrites one marked block of /etc/hosts and exits. Not a sudoers rule and not setuid.' },
     { t: 'Managed block', d: 'The region of /etc/hosts between Portico’s markers. Everything outside it is copied through untouched.' },
-    { t: 'Sidecar', d: 'A helper binary bundled inside the .app. Tauri stages it from binaries/ with a target-triple suffix.' }
+    { t: 'Sidecar', d: 'A helper binary bundled inside the .app. Tauri stages it from binaries/ with a target-triple suffix and strips the suffix in Contents/MacOS — verified in the 0.1.0 bundle.' }
   ]
 };

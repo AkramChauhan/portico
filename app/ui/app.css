@@ -426,8 +426,12 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-col
   animation: spin .7s linear infinite;
 }
 /* On a filled button the ring has to read against the accent background. */
-.btn.primary.busy::after, .btn.danger.busy::after {
+.btn.primary.busy::after {
   border-color: rgba(255,255,255,.45); border-top-color: #fff;
+}
+/* The danger button is outlined, not filled: a white ring vanished on it. */
+.btn.danger.busy::after {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent); border-top-color: var(--danger);
 }
 
 /* ============================================================

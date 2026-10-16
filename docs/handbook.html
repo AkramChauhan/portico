@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Portico — Engineering handbook</title>
 <meta name="doc:status"   content="Current">
-<meta name="doc:reviewed" content="2026-09-09">
-<meta name="doc:sources"  content="core/src/ngrok.rs, core/src/caddy.rs, core/src/setup.rs, core/src/tunnel.rs, core/src/target.rs, core/src/runner.rs, core/src/lib.rs, core/src/cloudflare.rs, core/src/secrets.rs, core/src/lan.rs, hostsd/src/main.rs">
+<meta name="doc:reviewed" content="2026-10-17">
+<meta name="doc:sources"  content="core/src/ngrok.rs, core/src/caddy.rs, core/src/setup.rs, core/src/tunnel.rs, core/src/target.rs, core/src/runner.rs, core/src/lib.rs, core/src/cloudflare.rs, core/src/secrets.rs, core/src/lan.rs, core/src/config.rs, core/src/hosts.rs, core/src/paths.rs, hostsd/src/main.rs">
 <link rel="stylesheet" href="assets/docs.css?v=0.3">
 <style>
   .diagram { width:100%; height:auto; display:block; }
@@ -37,13 +37,13 @@
       <h1>How Portico works, and what it costs</h1>
       <p class="lede">Portico is a thin, unprivileged app driving a Caddy server. The design
       turns on one decision — every site gets a second, plain-HTTP vhost on loopback — and one
-      tradeoff: it installs a root daemon and then stops asking for a password. This document
+      tradeoff: it installs two small root jobs once and then stops asking for a password. This document
       covers both, plus the platform traps that look like arbitrary complexity until you know
       what they defend against.</p>
       <div class="d-meta">
         <span><b>Status</b> Current</span>
         <span><b>Owner</b> akramchauhan</span>
-        <span><b>Last reviewed</b> 2026-09-09</span>
+        <span><b>Last reviewed</b> 2026-09-14</span>
       </div>
     </div>
 
@@ -88,8 +88,8 @@
         <text x="468" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">Caddy</text>
 
         <rect x="392" y="96" width="152" height="50" rx="7" fill="var(--surface-2)" stroke="var(--border)"/>
-        <text x="468" y="115" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">:443  https://site.io</text>
-        <text x="468" y="132" text-anchor="middle" font-size="10.5" fill="var(--muted)">tls internal</text>
+        <text x="468" y="115" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">:18443  https://site.io</text>
+        <text x="468" y="132" text-anchor="middle" font-size="10.5" fill="var(--muted)">tls internal · bind loopback</text>
 
         <rect x="392" y="158" width="152" height="54" rx="7" fill="var(--surface-2)" stroke="var(--accent)" stroke-dasharray="4 3"/>
         <text x="468" y="177" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">:8880  loopback twin</text>
@@ -116,7 +116,7 @@
         <path d="M544 121 H 578 V 122 H 606" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
         <path d="M544 185 H 606 V 182" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
 
-        <text x="276" y="46" text-anchor="middle" font-size="10.5" fill="var(--faint)">DNS: /etc/hosts</text>
+        <text x="276" y="46" text-anchor="middle" font-size="10.5" fill="var(--faint)">127.77.0.1:443 · pf → :18443</text>
         <text x="360" y="270" text-anchor="middle" font-size="10.5" fill="var(--faint)">--http-host-header site.io</text>
         <text x="468" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">same handler, either way</text>
       </svg>
@@ -133,7 +133,7 @@
     <div class="t-scroll"><table>
       <thead><tr><th>Name</th><th>How it resolves</th><th>Cost</th></tr></thead>
       <tbody>
-        <tr><td><code>app.localhost</code></td><td>macOS resolves <code>*.localhost</code> itself, per RFC 6761</td><td>Nothing at all</td></tr>
+        <tr><td><code>app.localhost</code></td><td>macOS resolves <code>*.localhost</code> itself, per RFC 6761</td><td>Nothing at all — but in System mode the URL carries <code>:18443</code>, <a href="#privilege">see why</a></td></tr>
         <tr><td><code>app.test</code></td><td>dnsmasq wildcard plus <code>/etc/resolver/test</code></td><td>Optional — only if dnsmasq is installed</td></tr>
         <tr><td><code>app.io</code></td><td>One line in the managed block of <code>/etc/hosts</code></td><td>One authorisation at install, then never again</td></tr>
       </tbody>
@@ -150,22 +150,94 @@
     </div>
 
 <h2 id="privilege">3 · The privilege split</h2>
-    <p>Exactly one thing genuinely requires root on macOS: binding ports 80 and 443.
+    <p>Exactly one thing genuinely requires root on macOS: answering on ports 80 and 443.
     Everything else has an unprivileged equivalent, and the two modes exist because of that
     single constraint.</p>
 
     <div class="grid c2">
       <div class="d-card"><h4>System mode — the default</h4>
-        <p>Caddy runs as a root LaunchDaemon, so URLs have no port. One authorisation at
-        install covers the daemon, DNS and the hosts helper.</p></div>
+        <p>Caddy runs as <b>you</b>, on loopback ports <code>18443</code>/<code>18080</code>.
+        Domains resolve to <code>127.77.0.1</code>, and a <code>pf</code> rule carries that
+        address&rsquo;s 443 and 80 across, so URLs have no port. One authorisation at install
+        covers the forwarding, DNS and the hosts helper.</p></div>
       <div class="d-card"><h4>Standalone mode</h4>
         <p>Caddy runs as a user LaunchAgent on <code>:8443</code>. Nothing outside the home
         folder is touched, except one <code>/etc/hosts</code> line for a custom domain.</p></div>
     </div>
 
+    <p><b>Portico never holds port 443.</b> It used to: a root Caddy on
+    <code>0.0.0.0:443</code> made Docker fail with <code>ports are not available … bind:
+    address already in use</code>. Now the only thing listening on 443 is whatever else you
+    run, and Portico&rsquo;s traffic arrives on an address nothing else uses.</p>
+
+    <figure>
+      <svg class="diagram" viewBox="0 0 760 196" role="img"
+           aria-label="127.0.0.1 port 443 reaches Docker; 127.77.0.1 port 443 is redirected by pf to Caddy on 18443">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 10 5 0 10z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+
+        <rect x="10" y="20" width="170" height="52" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="95" y="42" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">https://localhost</text>
+        <text x="95" y="60" text-anchor="middle" font-size="11" fill="var(--muted)">127.0.0.1:443</text>
+
+        <rect x="560" y="20" width="190" height="52" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="655" y="42" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Docker, or anything</text>
+        <text x="655" y="60" text-anchor="middle" font-size="11" fill="var(--muted)">bound to 0.0.0.0:443</text>
+
+        <rect x="10" y="124" width="170" height="52" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="95" y="146" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">https://app.io</text>
+        <text x="95" y="164" text-anchor="middle" font-size="11" fill="var(--muted)">/etc/hosts → 127.77.0.1:443</text>
+
+        <rect x="266" y="124" width="200" height="52" rx="8" fill="var(--surface)" stroke="var(--accent)" stroke-dasharray="4 3"/>
+        <text x="366" y="146" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--ink)">pf rdr on lo0</text>
+        <text x="366" y="164" text-anchor="middle" font-size="11" fill="var(--muted)">127.77.0.1:443 → 127.0.0.1:18443</text>
+
+        <rect x="560" y="124" width="190" height="52" rx="8" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.6"/>
+        <text x="655" y="146" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">Caddy, as you</text>
+        <text x="655" y="164" text-anchor="middle" font-size="11" fill="var(--muted)">127.0.0.1:18443 · ::1:18443</text>
+
+        <path d="M180 46 H 560" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar2)"/>
+        <path d="M180 150 H 266" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar2)"/>
+        <path d="M466 150 H 560" stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ar2)"/>
+        <text x="370" y="38" text-anchor="middle" font-size="10.5" fill="var(--faint)">no rule matches — the socket that owns 443 answers</text>
+        <text x="370" y="104" text-anchor="middle" font-size="10.5" fill="var(--faint)">pf rewrites the packet before any socket is chosen</text>
+      </svg>
+      <figcaption class="fig-t"><b>Two addresses, one port.</b> The rules match only
+      Portico&rsquo;s own destination addresses, never <code>127.0.0.1</code>, so the port stays
+      Docker&rsquo;s. Verified with Docker holding <code>*:443</code>: <code>https://localhost</code>
+      reached Docker while <code>https://naami.io</code> reached Caddy over IPv4 and IPv6 with a
+      verified certificate.</figcaption>
+    </figure>
+
+    <div class="t-scroll"><table>
+      <thead><tr><th style="width:210px">Simpler option</th><th>Why it does not work</th></tr></thead>
+      <tbody>
+        <tr><td>Keep root Caddy, bind <code>127.0.0.1:443</code> only</td><td>macOS refuses another user&rsquo;s <code>0.0.0.0:443</code> bind while root holds the port on <em>any</em> address — <code>EADDRINUSE</code> even with <code>SO_REUSEADDR</code> and <code>SO_REUSEPORT</code>. Tested against a live root listener.</td></tr>
+        <tr><td>Run Caddy as you on <code>127.0.0.1:443</code></td><td>Unprivileged low-port binds are allowed on the wildcard address only; a specific address fails with <code>EACCES</code>. Tested.</td></tr>
+        <tr><td>Forward <code>127.0.0.1:443</code> instead of an alias</td><td>Takes <code>localhost:443</code> away from Docker, which is the problem being solved.</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>That last row is also why a <code>.localhost</code> site shows <code>:18443</code> in System
+    mode. Browsers resolve <code>*.localhost</code> to <code>127.0.0.1</code> themselves, without
+    reading <code>/etc/hosts</code>, so the name can never reach the forwarded address. It is
+    served on Caddy&rsquo;s own port rather than by claiming 443 back.</p>
+
+    <p>The forwarding lives in the <code>com.apple/portico</code> anchor, which the stock
+    <code>/etc/pf.conf</code> already evaluates, so no system file is edited. Enabling
+    <code>pf</code> hands back a reference token; Portico keeps exactly one and releases it on
+    uninstall, so pf stays on for anything else that enabled it. Aliases and rules both vanish
+    on restart, which is why a root job re-applies them at every boot (verified across a
+    reboot: <code>/var/log/portico-loopback.log</code> records each run). The doctor proves the
+    path works by asking <code>127.77.0.1:80</code> for a hostname no site uses and looking
+    for Portico&rsquo;s own 404 — an open socket alone could be Docker&rsquo;s.</p>
+
     <p>The app itself is never privileged. It reconfigures Caddy through the loopback admin
-    API, which is why adding a site is instant and silent — and also the source of the
-    largest open risk, covered in <a href="#admin">section 9</a>.</p>
+    API, which is why adding a site is instant and silent — covered in
+    <a href="#admin">section 9</a>.</p>
 
 <h2 id="targets">4 · Working out what to serve</h2>
     <p>Point the target at a directory and the type is inferred, so a port is only needed for
@@ -262,15 +334,15 @@
     <div class="t-scroll"><table>
       <thead><tr><th>Tier</th><th>Who can reach it</th><th>Address</th><th>TLS</th></tr></thead>
       <tbody>
-        <tr><td>Local</td><td>This Mac &mdash; <b>plus anyone on the network who knows the hostname</b>, in System mode</td><td><code>https://shop.test</code></td><td>Portico&rsquo;s own CA, trusted here</td></tr>
+        <tr><td>Local</td><td>This Mac only</td><td><code>https://shop.test</code></td><td>Portico&rsquo;s own CA, trusted here</td></tr>
         <tr><td>Local network</td><td>Anyone on the same network</td><td><code>http://192.168.1.5:8801</code></td><td><span class="badge amber dot">None</span> &mdash; plain HTTP</td></tr>
         <tr><td>Public</td><td>The entire internet</td><td><code>https://hooks.example.com</code></td><td>Publicly trusted, via Cloudflare</td></tr>
       </tbody>
     </table></div>
 
     <p>The obstacle to LAN sharing is not the listening socket &mdash; it is that the other
-    device cannot resolve the name. dnsmasq answers on <code>127.0.0.1</code> and returns
-    <code>127.0.0.1</code>; a phone can neither reach it nor use its answer. Publishing over
+    device cannot resolve the name. dnsmasq answers on <code>127.0.0.1</code> and returns a
+    loopback address; a phone can neither reach it nor use its answer. Publishing over
     mDNS or repointing each device&rsquo;s DNS both work, and both are a setup step per
     device.</p>
 
@@ -281,14 +353,11 @@
     that exists only in this Mac&rsquo;s trust store, so every other device would warn. A
     padlock that has to be explained is worse than no padlock.</p>
 
-    <p><b>The first row has a caveat that predates this feature.</b> In System mode Caddy binds
-    <code>0.0.0.0:443</code>, because <code>bind_line</code> emits no <code>bind</code> directive
-    there &mdash; only Standalone pins loopback. A machine on the same network that resolves
-    <code>shop.test</code> to this Mac, or simply sends the right <code>Host</code> header to its
-    IP, is served the site whether or not sharing is switched on. Verified: with <code>lan</code>
-    false on every site, <code>curl --resolve</code> against the LAN address returns 200. What the
-    sharing toggle adds is a port that answers <em>without</em> the right hostname, and an address
-    the user can hand out. It does not open the machine; System mode already did.</p>
+    <p><b>The first row used to have a caveat.</b> System mode Caddy bound
+    <code>0.0.0.0:443</code>, so a machine on the same network sending the right
+    <code>Host</code> header to this Mac&rsquo;s IP was served the site with sharing off
+    (R13). Every vhost now binds loopback in both modes, and the LAN listener is the only
+    socket on another interface — which is what the sharing toggle means.</p>
 
     <p>Unlike a public tunnel, this survives a restart. A quick tunnel is cleared at launch
     because its hostname is random and the user has never seen it; a LAN port is stable and
@@ -299,13 +368,17 @@
     <div class="t-scroll"><table>
       <thead><tr><th>Change</th><th>Mode</th><th>Owner</th><th>Removable</th></tr></thead>
       <tbody>
-        <tr><td><code>/Library/LaunchDaemons/io.portico.caddy.plist</code></td><td>System</td><td>root</td><td>Yes — <code>portico uninstall</code></td></tr>
+        <tr><td><code>/Library/LaunchDaemons/io.portico.loopback.plist</code>, runs once per boot</td><td>System</td><td>root</td><td>Yes — <code>portico uninstall</code></td></tr>
+        <tr><td><code>loopback.sh</code> and <code>pf.anchor</code> in <code>/Library/Application Support/Portico</code></td><td>System</td><td>root</td><td>Yes</td></tr>
+        <tr><td><code>lo0</code> aliases <code>127.77.0.1</code>, <code>fd70:6f72:7469:636f::1</code>; rules in pf anchor <code>com.apple/portico</code>; pf enabled</td><td>System</td><td>root</td><td>Yes — aliases removed, anchor flushed, pf reference released</td></tr>
+        <tr><td><code>/var/log/portico-loopback.log</code></td><td>System</td><td>root</td><td>Yes</td></tr>
         <tr><td><code>/Library/LaunchDaemons/io.portico.hostsd.plist</code></td><td>System</td><td>root</td><td>Yes</td></tr>
         <tr><td><code>/Library/Application Support/Portico/portico-hostsd</code></td><td>System</td><td>root</td><td>Yes</td></tr>
         <tr><td>Managed block in <code>/etc/hosts</code></td><td>Both</td><td>root</td><td>Yes — block removed entirely</td></tr>
         <tr><td><code>/etc/resolver/&lt;tld&gt;</code>, dnsmasq drop-in</td><td>System, if dnsmasq present</td><td>root</td><td>Yes</td></tr>
-        <tr><td><code>~/Library/LaunchAgents/io.portico.caddy.plist</code></td><td>Standalone</td><td>user</td><td>Yes — no password needed</td></tr>
+        <tr><td><code>~/Library/LaunchAgents/io.portico.caddy.plist</code></td><td>Both</td><td>user</td><td>Yes — no password needed</td></tr>
         <tr><td>Caddy CA in the login keychain</td><td>Both</td><td>user</td><td>Yes</td></tr>
+        <tr><td><code>/Library/LaunchDaemons/io.portico.caddy.plist</code> from older versions</td><td>System</td><td>root</td><td>Removed by setup — it held 80 and 443</td></tr>
         <tr><td><code>~/.portico</code> — mode <code>0700</code></td><td>Both</td><td>user</td><td>Delete the folder</td></tr>
       </tbody>
     </table></div>
@@ -317,8 +390,8 @@
 
     <div class="grid c2">
       <div class="d-card"><h4>Only loopback mappings</h4>
-        <p>The sole thing ever written is <code>127.0.0.1</code>/<code>::1</code> lines inside
-        Portico's own markers. Every other line of <code>/etc/hosts</code> is copied through
+        <p>The sole thing ever written is a mapping to Portico's two fixed loopback addresses,
+        inside Portico's own markers — the address is compiled in, never read from the request. Every other line of <code>/etc/hosts</code> is copied through
         untouched.</p></div>
       <div class="d-card"><h4>Strict hostname allowlist</h4>
         <p>Checked before use, so no whitespace, newline or <code>#</code> can break out of a
@@ -350,24 +423,15 @@
       <tbody></tbody>
     </table></div>
 
-<h2 id="admin">9 · The largest open risk</h2>
-    <p>Caddy's admin API listens unauthenticated on <code>127.0.0.1:2019</code>. In System
-    mode it drives a root process, so any local process can reconfigure it — including to
-    serve any file root can read.</p>
+<h2 id="admin">9 · The admin API</h2>
+    <p>Caddy's admin API listens unauthenticated on <code>127.0.0.1:2019</code>, so any local
+    process can reconfigure it. This was the largest open risk while System mode ran Caddy as
+    root: reconfiguring it meant serving any file root could read.</p>
 
-    <p>There is no clean fix available. Caddy supports a unix socket for the admin endpoint,
-    but offers no way to set that socket's permissions; created by root with a default umask
-    it would be unreachable by the unprivileged app that needs it. The alternatives — running
-    Caddy unprivileged behind a <code>pf</code> redirect, or building a bespoke privileged
-    helper for config changes — are substantial redesigns.</p>
-
-    <div class="note info">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.1" stroke-linecap="round"/></svg>
-      <div><span class="t">A nuance worth knowing.</span>
-      In <b>Standalone</b> mode this is not a privilege
-      boundary at all: Caddy runs as you, so the admin API grants nothing you do not already
-      have. The risk is specific to System mode.</div>
-    </div>
+    <p>Moving Caddy behind a <code>pf</code> redirect — the redesign this section once called
+    substantial — closed it as a side effect of freeing port 443. Caddy runs as you in both
+    modes now, so the admin API grants nothing a local process running as you does not
+    already have. It is still unauthenticated; it is no longer a privilege boundary.</p>
 
 <h2 id="macos">10 · macOS platform traps</h2>
     <p>None of these are documented anywhere obvious, and each cost a debugging cycle.</p>
@@ -399,6 +463,11 @@
           <td>A <code>WatchPaths</code> job fires on every change.</td>
           <td><code>ThrottleInterval</code> defaults to <b>10 seconds</b>. Two edits in quick succession silently skipped the second — which is exactly how removing a site left an orphaned hosts entry.</td>
           <td><code>ThrottleInterval</code> set to 1.</td>
+        </tr>
+        <tr>
+          <td>Binding root Caddy to <code>127.0.0.1:443</code> leaves <code>0.0.0.0:443</code> free.</td>
+          <td>xnu rejects a wildcard bind by a <em>different user</em> on a port root holds on any address, whatever the socket options. Docker runs as you, so it still failed.</td>
+          <td>Nothing Portico runs binds 443; pf forwards a dedicated address instead.</td>
         </tr>
         <tr>
           <td>Rust CLIs behave in pipelines.</td>
@@ -442,7 +511,7 @@
   </main>
 </div>
 
-<script src="data/data.js?v=0.3"></script>
+<script src="data/data.js?v=0.5"></script>
 <script src="assets/docs.js?v=0.3"></script>
 <script>
 window.DKInit = function () {

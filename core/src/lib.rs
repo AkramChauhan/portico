@@ -50,7 +50,7 @@ pub struct SiteView {
 
 fn view(cfg: &Config, site: &Site) -> SiteView {
     SiteView {
-        local_url: site.url(cfg.https_port(), cfg.http_port()),
+        local_url: cfg.site_url(site),
         target_label: site.target.describe(),
         wildcard_dns: !cfg.needs_hosts_entry(&site.domain),
         tunnel_state: tunnel::status(&site.id),
@@ -229,7 +229,7 @@ pub fn add_site(
     // it implies has actually gone through.
     apply(&cfg)?;
     cfg.save()?;
-    warm_certificate(&domain, cfg.https_port());
+    warm_certificate(&domain, cfg.listen_https_port());
 
     if run {
         let site = cfg.find(&slug(&domain)).unwrap().clone();
@@ -243,11 +243,15 @@ pub fn add_site(
 /// Caddy mints a certificate on the first request to a hostname, so that first
 /// request can fail or stall. Trigger issuance ourselves the moment a site is
 /// added, in the background, so the user's first click is already warm.
+///
+/// Aimed at Caddy's own listener with `--resolve`, so it works before the
+/// hosts entry or the forwarding has caught up.
 fn warm_certificate(domain: &str, port: u16) {
     let url = format!("https://{domain}:{port}/");
+    let resolve = format!("{domain}:{port}:127.0.0.1");
     std::thread::spawn(move || {
         let _ = std::process::Command::new("/usr/bin/curl")
-            .args(["-sk", "-o", "/dev/null", "--max-time", "10", &url])
+            .args(["-sk", "-o", "/dev/null", "--max-time", "10", "--resolve", &resolve, &url])
             .output();
     });
 }
@@ -569,11 +573,11 @@ fn apply(cfg: &Config) -> anyhow::Result<()> {
     let entries = cfg.hosts_entries();
     let _ = hosts::write_request(&entries);
 
-    if serving && hosts::needs_sync(&entries) {
+    if serving && hosts::needs_sync(&entries, cfg.loopback()) {
         if hosts::watcher_installed() {
             // launchd is watching the request file we just wrote; the helper
             // does the rest, with no password.
-            if !hosts::wait_for_sync(&entries, 12000) {
+            if !hosts::wait_for_sync(&entries, cfg.loopback(), 12000) {
                 anyhow::bail!(
                     "The /etc/hosts helper did not apply the change — see ~/.portico/logs/hostsd.log"
                 );

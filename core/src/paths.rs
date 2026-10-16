@@ -146,8 +146,27 @@ pub fn ensure_dirs() -> std::io::Result<()> {
 
 pub const HOSTS_FILE: &str = "/etc/hosts";
 pub const RESOLVER_DIR: &str = "/etc/resolver";
+/// Where Caddy ran as root before System mode moved it to a login agent. Only
+/// referenced now to retire it: left loaded, it holds ports 80 and 443.
 pub const LAUNCH_DAEMON: &str = "/Library/LaunchDaemons/io.portico.caddy.plist";
 pub const DAEMON_LABEL: &str = "io.portico.caddy";
+
+// --- Loopback forwarding: a root job launchd runs once per boot. It adds the
+// --- loopback addresses and loads the pf rules carrying their 80/443 to Caddy.
+
+pub const LOOPBACK_LABEL: &str = "io.portico.loopback";
+pub const LOOPBACK_PLIST: &str = "/Library/LaunchDaemons/io.portico.loopback.plist";
+/// Root-owned, in the helper's directory, for the same reason as the helper.
+pub const LOOPBACK_SCRIPT: &str = "/Library/Application Support/Portico/loopback.sh";
+pub const PF_RULES: &str = "/Library/Application Support/Portico/pf.anchor";
+/// The reference pf hands back for enabling it, so it can be released again.
+pub const PF_TOKEN: &str = "/Library/Application Support/Portico/pf.token";
+/// A system path, not ~/.portico/logs: launchd never created the file there
+/// for this job, leaving a failed boot run with nothing to read.
+pub const LOOPBACK_LOG: &str = "/var/log/portico-loopback.log";
+/// A child of the anchor macOS's own /etc/pf.conf already evaluates, so no
+/// system file has to be edited to reach it.
+pub const PF_ANCHOR: &str = "com.apple/portico";
 
 // --- The /etc/hosts helper: a root-owned binary launchd runs on demand, so
 // --- mapping a new domain costs no password after the initial setup.
@@ -194,8 +213,8 @@ pub fn find_hostsd_in(dir: &std::path::Path) -> Option<PathBuf> {
         })
 }
 
-// --- Standalone mode: everything below lives inside the user's own home,
-// --- so none of it needs an administrator.
+// --- Caddy's login agent, used by both modes: everything below lives inside
+// --- the user's own home, so none of it needs an administrator.
 
 pub fn agent_plist() -> PathBuf {
     home()
@@ -212,8 +231,8 @@ pub fn ca_pem() -> PathBuf {
     root().join("caddy-root.pem")
 }
 
-/// Caddy's admin API. Localhost-only, which is what lets the unprivileged app
-/// reconfigure the root-owned Caddy daemon without a password prompt per site.
+/// Caddy's admin API. Localhost-only, which is what lets the app reconfigure
+/// Caddy without a password prompt per site.
 pub const CADDY_ADMIN: &str = "127.0.0.1:2019";
 
 /// Homebrew prefix differs between Apple Silicon and Intel.

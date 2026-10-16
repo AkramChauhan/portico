@@ -9,8 +9,9 @@
 //! The file that triggers this runs is writable by the logged-in user, so treat
 //! its contents as hostile input. Everything here is built around that:
 //!
-//!   * the only thing ever written is `127.0.0.1`/`::1` mappings, between our
-//!     own markers — the rest of /etc/hosts is copied through untouched;
+//!   * the only thing ever written is a mapping to Portico's two fixed loopback
+//!     addresses, between our own markers — the rest of /etc/hosts is copied
+//!     through untouched;
 //!   * every hostname is validated against a strict allowlist before use, so
 //!     no whitespace, newline or comment character can break out of a line and
 //!     forge an entry;
@@ -30,6 +31,15 @@ const END_MARK: &str = "# === Portico END ===";
 /// Generous enough for any real workflow, small enough that a runaway or
 /// malicious writer cannot bloat /etc/hosts without bound.
 const MAX_DOMAINS: usize = 200;
+
+/// The addresses every domain is mapped to. Fixed here rather than read from
+/// the request, so a hostile writer cannot point a name anywhere but loopback.
+///
+/// Must match `LOOPBACK_V4`/`LOOPBACK_V6` in core's config.rs; a test there
+/// reads this file to hold the two together. pf forwards these addresses'
+/// ports 80 and 443 to Caddy, which is what leaves 127.0.0.1:443 free.
+const LOOPBACK_V4: &str = "127.77.0.1";
+const LOOPBACK_V6: &str = "fd70:6f72:7469:636f::1";
 
 fn main() {
     let request = match std::env::args().nth(1) {
@@ -129,8 +139,8 @@ fn sync(domains: &[String]) -> Result<(), String> {
         out.push_str(BEGIN_MARK);
         out.push('\n');
         for d in domains {
-            out.push_str(&format!("127.0.0.1\t{d}\n"));
-            out.push_str(&format!("::1\t\t{d}\n"));
+            out.push_str(&format!("{LOOPBACK_V4}\t{d}\n"));
+            out.push_str(&format!("{LOOPBACK_V6}\t\t{d}\n"));
         }
         out.push_str(END_MARK);
         out.push('\n');

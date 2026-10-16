@@ -11,11 +11,32 @@ pub const PLAIN_PORT: u16 = 8880;
 /// is what lets a PHP project be served from a path with no port of its own.
 pub const PHP_FPM_DEFAULT: &str = "127.0.0.1:9000";
 
+/// The loopback addresses System-mode domains resolve to.
+///
+/// Not 127.0.0.1, so that Portico never holds port 443 or 80 at all. A pf rule
+/// forwards these two addresses' 80/443 to Caddy on the high ports below, which
+/// leaves `0.0.0.0:443` and `localhost:443` free for anything else — Docker in
+/// particular. Merely binding Caddy to 127.0.0.1:443 is not enough: macOS
+/// refuses another user's `0.0.0.0` bind on a port that root holds on any
+/// address, even with SO_REUSEADDR and SO_REUSEPORT.
+///
+/// The IPv6 address is a ULA spelling "portico" in hex. The hosts block has
+/// always mapped both stacks, and keeps doing so rather than leaving a custom
+/// domain such as `app.io` with no local AAAA answer.
+pub const LOOPBACK_V4: &str = "127.77.0.1";
+pub const LOOPBACK_V6: &str = "fd70:6f72:7469:636f::1";
+
+/// Where Caddy actually listens in System mode, on loopback only. pf forwards
+/// `LOOPBACK_V4`/`LOOPBACK_V6` ports 443 and 80 here.
+pub const SYSTEM_HTTPS_BACKEND: u16 = 18443;
+pub const SYSTEM_HTTP_BACKEND: u16 = 18080;
+
 /// How much of the machine the app is allowed to touch.
 ///
-/// The difference is forced by one fact: binding ports 80 and 443 requires
-/// root on macOS. Everything else — DNS, certificate trust, keeping a server
-/// alive across reboots — has a perfectly good unprivileged equivalent.
+/// The difference is forced by one fact: answering on ports 80 and 443 needs
+/// root on macOS — here, to install the loopback forwarding once. Everything
+/// else — DNS, certificate trust, keeping a server alive across reboots — has a
+/// perfectly good unprivileged equivalent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
@@ -256,7 +277,7 @@ impl Config {
         Ok(())
     }
 
-    /// The port sites are actually served on, given the current mode.
+    /// The port a browser uses for a site, given the current mode.
     pub fn https_port(&self) -> u16 {
         match self.mode {
             Mode::System => 443,
@@ -268,6 +289,54 @@ impl Config {
         match self.mode {
             Mode::System => 80,
             Mode::Standalone => self.standalone_http_port,
+        }
+    }
+
+    /// The port Caddy itself binds. Differs from `https_port` in System mode,
+    /// where pf carries 443 across to it.
+    pub fn listen_https_port(&self) -> u16 {
+        match self.mode {
+            Mode::System => SYSTEM_HTTPS_BACKEND,
+            Mode::Standalone => self.standalone_https_port,
+        }
+    }
+
+    pub fn listen_http_port(&self) -> u16 {
+        match self.mode {
+            Mode::System => SYSTEM_HTTP_BACKEND,
+            Mode::Standalone => self.standalone_http_port,
+        }
+    }
+
+    /// The addresses a domain is mapped to in /etc/hosts and dnsmasq.
+    ///
+    /// Standalone has no forwarding, so its domains point straight at the
+    /// loopback address Caddy is bound to.
+    pub fn loopback(&self) -> (&'static str, &'static str) {
+        match self.mode {
+            Mode::System => (LOOPBACK_V4, LOOPBACK_V6),
+            Mode::Standalone => ("127.0.0.1", "::1"),
+        }
+    }
+
+    /// The address a browser opens for this site.
+    ///
+    /// A `.localhost` name is the exception in System mode. Browsers resolve
+    /// it to 127.0.0.1 themselves, without consulting /etc/hosts, so it can
+    /// never reach the forwarded address — and forwarding 127.0.0.1:443 would
+    /// take port 443 back from everything else. It is served on Caddy's own
+    /// port instead.
+    pub fn site_url(&self, site: &Site) -> String {
+        let (https, http) = self.browser_ports(&site.domain);
+        site.url(https, http)
+    }
+
+    /// The (https, http) ports a browser uses for this domain.
+    pub fn browser_ports(&self, domain: &str) -> (u16, u16) {
+        if self.mode == Mode::System && is_native(domain) {
+            (self.listen_https_port(), self.listen_http_port())
+        } else {
+            (self.https_port(), self.http_port())
         }
     }
 
@@ -438,6 +507,32 @@ mod tests {
         c.mode = Mode::Standalone;
         assert_eq!(c.https_port(), 8443);
         assert_eq!(c.http_port(), 8080);
+    }
+
+    #[test]
+    fn system_mode_never_listens_on_the_ports_it_serves() {
+        // The whole point of the forwarding: Caddy must not hold 80 or 443,
+        // or Docker and anything else cannot bind them.
+        let c = Config::default();
+        assert_eq!(c.mode, Mode::System);
+        assert!(c.listen_https_port() > 1024 && c.listen_http_port() > 1024);
+        assert_eq!(c.loopback(), (LOOPBACK_V4, LOOPBACK_V6));
+        assert_ne!(c.loopback().0, "127.0.0.1", "127.0.0.1:443 must stay free for other tools");
+    }
+
+    #[test]
+    fn a_localhost_site_in_system_mode_shows_the_port_it_is_really_on() {
+        // Browsers pin *.localhost to 127.0.0.1, which is not forwarded.
+        let mut c = Config::default();
+        let mut s = site_named("a");
+        s.domain = "app.localhost".into();
+        assert_eq!(c.site_url(&s), format!("https://app.localhost:{SYSTEM_HTTPS_BACKEND}"));
+        s.domain = "app.test".into();
+        assert_eq!(c.site_url(&s), "https://app.test");
+
+        c.mode = Mode::Standalone;
+        s.domain = "app.localhost".into();
+        assert_eq!(c.site_url(&s), "https://app.localhost:8443");
     }
 
     #[test]

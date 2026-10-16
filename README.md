@@ -158,13 +158,14 @@ describes.
 
 ## Security in one paragraph
 
-Portico installs a root daemon (to bind ports 80/443) and a small root helper that rewrites
-one marked block of `/etc/hosts` without asking again. That helper grants any process
-running as you the permanent ability to point a hostname at loopback — bounded to exactly
-that, with a strict allowlist and no path to root code execution. Caddy's admin API is
-unauthenticated on loopback and drives that root daemon, which is the largest open risk.
-All of it is removable with `portico uninstall`. The
-[handbook](https://akramchauhan.github.io/portico/handbook.html) states the full model,
+Portico never binds ports 80 or 443, so Docker and anything else can keep them. Your
+domains resolve to a dedicated loopback address, `127.77.0.1`, and a `pf` rule forwards
+that address's 80 and 443 to Caddy, which runs as you on loopback-only high ports. A small
+root job re-applies that rule at boot, and a root helper rewrites one marked block of
+`/etc/hosts` without asking again. That helper grants any process running as you the
+permanent ability to point a hostname at Portico's loopback address — bounded to exactly
+that, with a strict allowlist and no path to root code execution. All of it is removable
+with `portico uninstall`. The [handbook](https://akramchauhan.github.io/portico/handbook.html) states the full model,
 including what is accepted rather than solved.
 
 Found something? Open an issue — or for anything sensitive, contact the maintainer directly

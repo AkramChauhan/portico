@@ -820,19 +820,29 @@ function renderTunnelState(s) {
   return wrap;
 }
 
+/* The last health and requests seen per site. The site page is rebuilt on every
+ * poll; starting the panel empty shrank the page until the data came back,
+ * and WebKit, with no scroll anchoring, kept the clamped position. Whatever
+ * sat below the panel (the Remove button, mid-confirm) went off-screen. */
+const monitorCache = new Map();
+
 function renderMonitor(s) {
   const panel = el("div", "monitor");
+  const cached = monitorCache.get(s.id) || {};
+  const remember = (patch) => monitorCache.set(s.id, { ...monitorCache.get(s.id), ...patch });
 
   const head = el("div", "monitor-head");
   const health = el("span", "muted", "Checking…");
   head.append(el("strong", null, t("monitor.health")), health);
   panel.append(head);
 
+  const showHealth = (h) => {
+    health.className = h.ok ? "hstat up" : "hstat down";
+    health.textContent = `${h.ok ? t("monitor.up") : t("monitor.down")} · ${h.detail} · ${h.ms} ms`;
+  };
+  if (cached.health) showHealth(cached.health);
   invoke("site_health", { id: s.id })
-    .then((h) => {
-      health.className = h.ok ? "hstat up" : "hstat down";
-      health.textContent = `${h.ok ? t("monitor.up") : t("monitor.down")} · ${h.detail} · ${h.ms} ms`;
-    })
+    .then((h) => { remember({ health: h }); showHealth(h); })
     .catch((e) => { health.className = "hstat down"; health.textContent = String(e); });
 
   panel.append(el("div", "monitor-head", t("monitor.requests")));
@@ -840,7 +850,7 @@ function renderMonitor(s) {
   table.append(el("div", "muted", t("monitor.loading")));
   panel.append(table);
 
-  invoke("site_requests", { id: s.id, limit: 15 }).then((rows) => {
+  const showRows = (rows) => {
     table.replaceChildren();
     if (!rows.length) {
       table.append(el("div", "muted", t("monitor.noRequests")));
@@ -858,14 +868,21 @@ function renderMonitor(s) {
       row.title = r.remote ? "from " + r.remote : "";
       table.append(row);
     }
+  };
+  if (cached.rows) showRows(cached.rows);
+  invoke("site_requests", { id: s.id, limit: 15 }).then((rows) => {
+    remember({ rows });
+    showRows(rows);
   });
 
   if (s.managed) {
     panel.append(el("div", "monitor-head", t("monitor.devlog")));
-    const pre = el("pre", "devlog", t("monitor.loading"));
+    const pre = el("pre", "devlog", cached.devlog ?? t("monitor.loading"));
     panel.append(pre);
-    invoke("site_dev_log", { id: s.id, lines: 20 }).then((t) => {
-      pre.textContent = t.trim() || t("monitor.noOutput");
+    pre.scrollTop = pre.scrollHeight;
+    invoke("site_dev_log", { id: s.id, lines: 20 }).then((out) => {
+      pre.textContent = out.trim() || t("monitor.noOutput");
+      remember({ devlog: pre.textContent });
       pre.scrollTop = pre.scrollHeight;
     });
   }
